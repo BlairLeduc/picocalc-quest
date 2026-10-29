@@ -4,6 +4,86 @@ What each milestone verified, on which board, on what date, and what was
 not checked, newest first. `design.md` §16 holds each milestone's scope
 and done-when criteria; this file keeps the full record.
 
+**M1 (board bring-up) is done**, on 2026-10-29, on a Pimoroni Pico Plus 2 W
+(RP2350B rev 2, 16 MB flash; the image does not probe the radio, the
+owner named the board) in a PicoCalc, flashed over SWD, with Arm GCC
+15.2.Rel1 and SDK 2.3.1, development build. The test pattern checked on
+the panel by the owner.
+
+- **Clocks** (`picocalc/board.c`, from pico-atom's 300 MHz path, §11.1):
+  150 MHz, rail to 1.20 V, the flash's QMI divider and RX delay doubled
+  from SRAM, PLL to 300 MHz, `clk_peri` onto `clk_sys`.
+- **Log** (`picocalc/log.c`, §14.2): a `stdio_driver_t` into a 4 KB ring
+  under a hardware spin lock, so upstream's `printf` goes through it from
+  either core; it writes the UART directly until core 1 starts, then core 1
+  drains it. UART0 on GP2/GP3 through UART_AUX (D12). Writes that do not
+  fit are dropped whole and counted.
+- **Core 1** (`picocalc/core1.c`): the southbridge, then the LCD (from
+  pico-oric, with its sleeps made busy waits, HW §9.7), the corner-coded
+  test pattern, then the log pump, a battery and temperature read each
+  second, and the heartbeat's skeleton.
+- **PSRAM** (`picocalc/psram_check.c`, §11.3): upstream's `psram_init()`,
+  then a round trip before the heap: a word at every power-of-two offset,
+  and 64 blocks of 1 KB spread over the 8 MB, plain and inverted, with the
+  XIP cache cleaned and invalidated between write and read. On failure,
+  core 0 stops before the heap and core 1 paints the picture's area red.
+- **Clock** (`picocalc/clock.c`, §13.2): the shell's time, read on each side
+  of the clock change, and the calendar arithmetic, with its host test.
+- **Scripts**: `flash.sh` (from pico-oric: `reset halt` then `resume`) and
+  `capture.sh` (refuses a port in use; timestamped log under `out/`).
+
+**Checked on the board** (UART logs `out/m1-first.log`, `out/m1-second.log`,
+not committed):
+
+- The banner arrives, then **118 consecutive heartbeats** (1 to 118, none
+  missing) with **0 I²C errors and 0 log writes dropped**.
+- clk_sys and clk_peri 300,000,000 Hz, core rail 1,200 mV; flash clkdiv 6,
+  RX delay 4 (**50 MHz**); PSRAM clkdiv 3, RX delay 3 (**100 MHz**).
+- **PSRAM verifies at 300 MHz**: 32,790 words in 16.3–16.5 ms (two boots).
+- Southbridge: I²C 10,000 Hz, firmware version 0, a register read
+  4,840–4,853 µs; battery 100 %.
+- LCD: SPI **75,000,000 Hz as configured** (not measured on SCK); init,
+  reset to DISPON, 424 ms; the test pattern 19.4 ms. **The owner checked
+  the pattern on the panel**: the four corners' colours, the border on all
+  four edges, the colour bars and the grey ramp, all as drawn.
+- **The shell's clock**: set (the POWMAN record survived the SWD reset),
+  read as 2026-10-29 14:18:09 UTC, offset +0:00, matching the workstation's
+  UTC to the minute; across the clock change it moved 1–2 ms in 1.3–1.6 ms of
+  uptime.
+- Die temperature 21–23 °C over two minutes at 300 MHz, idle core 1, core 0
+  in upstream's welcome and then its empty selector.
+- Upstream's start-up continues: dlmalloc heap 7,680 KB, the SD card mounts
+  on `spi0` at the configured 25 MHz (no `/quest` on the card used), and the
+  selector reports 0 games.
+
+**Host:** `test_clock` passes: every day from 1900 to 2199 against a
+day-by-day model, offsets either side of UTC and across midnight and the
+year, 2000 and 2100, before 1970, and the fallback.
+
+**Measured** (development build): RAM used to 120,636 bytes, leaving
+**338,116 of 448 KB** (the log ring is 4,096 of the 4,804 bytes added);
+text 3,606,988 bytes. Core 1's loop ran 42,600–42,950 times a second while
+core 0 ran the welcome screen and 49,750 once it was in the selector, a
+sign that core 0's work slows core 1's fetches through the shared XIP
+cache; M2 measures it properly.
+
+**Found:**
+- `flash_do_cmd` (here, reading the JEDEC id for the banner) puts back the
+  bootrom's flash timing, so the first boot ran the flash at 100 MHz.
+  The id is now read before the clock moves (HW §3, §11.4).
+- Upstream's welcome screen, set for 10 s, ran about 85 s before the
+  selector, with nothing presenting its frames; M2 looks at its timing.
+- Upstream's `cabal_system_init()` still starts PS/2 on `pio0`/`pio1`
+  and says the mouse failed; the M3 patch removes it.
+- The crash record's magic reads as garbage at a cold boot, as expected of
+  `.uninitialized_data`; upstream prints it and goes on.
+
+**Not checked:** started from the shell, the time against the shell's own
+display (the clock was read after an SWD reset, not a shell launch; moved
+to M7 by the owner, whose saves check it); the release build on the board
+(built clean, not flashed); the temperature under load; the image on a
+Plus 2 without the W.
+
 **M0 (skeleton, patch pipeline, CI) is built**, on 2026-10-29, on macOS
 with Arm GCC 15.2.Rel1, Pico SDK 2.3.1 and BSD `patch` and `diff`. Not on
 a device.

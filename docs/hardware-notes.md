@@ -123,7 +123,12 @@ Design around these from the start; each one has cost a project time.
   synthesize or decode in software.
 - **No battery-backed real-time clock.** The RP2350's AON timer (RP2040's RTC)
   loses time at power-off. Wall-clock time comes from the network on a W board,
-  or from the user.
+  or from the user. Once set, the RP2350's timer keeps running through a
+  system reset (a watchdog reboot, an SWD reset) and through a move of
+  `clk_sys`, since it counts its own 1 kHz tick: on a Pimoroni Pico Plus 2 W
+  on 2026-10-29, read on each side of the 150 → 300 MHz switch (PLL, rail and
+  flash divider), it advanced 1–2 ms across 1.3–1.6 ms of uptime, as its
+  millisecond resolution allows, and agreed with the workstation's UTC.
 
 ---
 
@@ -222,6 +227,11 @@ memory-mapped window. Do not assume a generic `pico2` build enables it. Three th
   `xip_cache_clean_all()` + `xip_cache_invalidate_all()` to force a real round
   trip, then read back. A marginal QMI configuration then degrades to SRAM-only
   instead of handing your allocator a region that hardfaults on use.
+  It is cheap: on a Pimoroni Pico Plus 2 W at 300 MHz with the PSRAM at
+  100 MHz (divider 3, RX delay 3), 2026-10-29, a word at every power-of-two
+  offset plus 64 KB of pseudo-random words spread over the 8 MB, written,
+  read back and written inverted, 32,790 words with three clean-and-invalidate
+  round trips, took 16.3–16.5 ms and passed.
 - **PSRAM reads go through the same 16 KB XIP cache as instruction fetch from
   flash.** Cached reads are SRAM-speed; a cache-hostile access pattern is not,
   and it contends with your code. §9.3 has the measurement.
@@ -463,6 +473,19 @@ timing changes. Do it once, at power-on, before stdio or any peripheral is
 up, so each driver derives its rate from the clock it finds. To change the
 clock later, save the choice and restart with the watchdog rather than retune
 running peripherals.
+
+**Every flash command puts the bootrom's flash timing back.** The SDK's
+`flash_do_cmd`, `flash_range_erase` and `flash_range_program` take the
+flash out of XIP and return it through the boot stage's XIP set-up, which
+writes `qmi_hw->m[0].timing` afresh. The SDK saves and restores the
+PSRAM's chip select (`m[1]`) around these calls, but not the flash's own
+(read from SDK 2.3.1's `hardware_flash/flash.c`). So a divider doubled for
+300 MHz is undone by the next flash command, and the flash then runs at
+100 MHz without any visible fault. **Found** on a Pimoroni Pico Plus 2 W
+(RP2350B, 16 MB) on 2026-10-29: a JEDEC id read (`0x9F`) made through
+`flash_do_cmd` after the clock went up left the timing at clkdiv 3,
+RX delay 2. Read the flash's ids before raising the clock, or write the
+timing again after every flash command.
 
 **The core rail survives a reset.** A 150 MHz build flashed over SWD after a
 300 MHz run, or restarted by the watchdog, comes back with the rail still at

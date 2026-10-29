@@ -101,8 +101,15 @@ else()
     # built as it comes.
     set(PICOCALC_QUEST_SOURCES
         picocalc/audio_shim.c
+        picocalc/board.c
+        picocalc/clock.c
+        picocalc/core1.c
         picocalc/input_shim.c
+        picocalc/lcd.c
+        picocalc/log.c
         picocalc/main.c
+        picocalc/psram_check.c
+        picocalc/southbridge.c
         picocalc/syscalls.c
         picocalc/video_shim.c
     )
@@ -184,16 +191,23 @@ else()
     target_link_libraries(picocalc-quest
         pico_stdlib
         pico_multicore
+        pico_unique_id
+        hardware_adc
         hardware_dma
         hardware_flash
+        hardware_i2c
         hardware_irq
         hardware_pio
+        hardware_powman     # the shell's clock (§13.2)
         hardware_pwm
         hardware_spi
         hardware_watchdog
+        hardware_xip_cache
     )
 
-    pico_enable_stdio_uart(picocalc-quest ${PICOCALC_QUEST_UART_ON})
+    # stdio is picocalc/log.c's driver, into the log ring (§14.2), not the
+    # SDK's UART driver, which blocks.
+    pico_enable_stdio_uart(picocalc-quest 0)
     pico_enable_stdio_usb(picocalc-quest 0)
 
     # Upstream's linker script: the 64 KB main stack the GOB engine needs
