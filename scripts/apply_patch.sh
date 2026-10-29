@@ -46,6 +46,8 @@ if [ ! -f "$patch_file" ]; then
     echo "apply_patch.sh: no patch at $patch_file" >&2
     exit 1
 fi
+# Absolute, since patch -d changes directory before it opens -i's file.
+patch_file="$(cd "$(dirname "$patch_file")" && pwd)/$(basename "$patch_file")"
 
 # The files the patch edits, from its +++ lines (create_patch.sh writes
 # them without timestamps).

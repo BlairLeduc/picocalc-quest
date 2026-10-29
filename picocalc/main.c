@@ -21,7 +21,10 @@ void cabal_init(void);
 int cabal_main(void);
 void cabal_enable_psram_heap(void);
 
-/* Upstream's two PSRAM framebuffer slots, as its main.c uses them. */
+/* Upstream's two PSRAM framebuffer slots, as its main.c uses them. Its
+ * swap also handed the new front buffer to HDMI (graphics_set_buffer);
+ * nothing presents in M0, so that hand-off is gone until M2's pool
+ * publishes the buffer to core 1 (§7.2). */
 static uint8_t *framebuffer[2];
 static int front;
 

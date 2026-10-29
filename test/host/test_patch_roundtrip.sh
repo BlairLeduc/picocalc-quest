@@ -43,6 +43,11 @@ synthetic() {
     "$create" --upstream "$up" --working "$tmp/w2" --patch "$tmp/p2.patch" >/dev/null
     cmp -s "$tmp/p1.patch" "$tmp/p2.patch" || fail "the patch changed on a second round trip"
 
+    # A relative --patch, as typed by hand: patch -d must not lose it.
+    (cd "$tmp" && "$apply" --working --upstream up --out w-rel --patch p1.patch >/dev/null) ||
+        fail "apply_patch.sh failed with a relative --patch"
+    diff -r "$w" "$tmp/w-rel" || fail "a relative --patch did not reproduce working/"
+
     # The build's copy: all of upstream, the edits applied, no .git.
     "$apply" --upstream "$up" --out "$tmp/full" --patch "$tmp/p1.patch" >/dev/null
     [ ! -e "$tmp/full/.git" ] || fail "the build's copy kept upstream's .git"
