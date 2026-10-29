@@ -16,3 +16,10 @@ target_include_directories(test_clock PRIVATE ${PROJECT_SOURCE_DIR}/picocalc)
 target_compile_definitions(test_clock PRIVATE PICOCALC_QUEST_HOST=1)
 target_compile_options(test_clock PRIVATE ${PICOCALC_QUEST_WARNINGS})
 add_test(NAME test_clock COMMAND test_clock)
+
+# The frame pool, the colour conversion and the row expander (§7.2).
+add_executable(test_framepool test_framepool.c ${PROJECT_SOURCE_DIR}/picocalc/framepool.c)
+target_include_directories(test_framepool PRIVATE ${PROJECT_SOURCE_DIR}/picocalc)
+target_compile_definitions(test_framepool PRIVATE PICOCALC_QUEST_HOST=1)
+target_compile_options(test_framepool PRIVATE ${PICOCALC_QUEST_WARNINGS})
+add_test(NAME test_framepool COMMAND test_framepool)

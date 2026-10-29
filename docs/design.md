@@ -22,8 +22,9 @@ from the companions' measurements.
 **Status, 2026-10-29.** M0 built: the whole engine set links for the Plus 2
 with empty shims. M1 done on a Plus 2 W: 300 MHz at 1.20 V, the log
 ring, banner and heartbeat over UART0, PSRAM checked, the southbridge, and
-the LCD's test pattern, checked on the panel by the owner (§16,
-`milestones.md`). Upstream is pinned at commit
+the LCD's test pattern, checked on the panel by the owner. M2 done on the
+same board: the frame pool and the presenter on core 1, upstream's welcome
+screen on the panel, checked by the owner (§16, `milestones.md`). Upstream is pinned at commit
 `949301b6ef87a5482340167378cd102fcdb82ef2` (2026-05-12, release 1.00).
 
 **Contents**
@@ -244,7 +245,7 @@ them by. Then those upstream files compile **unchanged**.
 | Upstream calls | Upstream implementation (not compiled) | PicoCalc implementation |
 |---|---|---|
 | `graphics_init`, `graphics_set_res`, `graphics_set_buffer`, `graphics_set_palette`, `graphics_set_bgcolor` | `drivers/HDMI.c` | `picocalc/video_shim.c`: palette into a pending table; buffers through the frame pool (§7.2) |
-| `cabal_get_framebuffer`, `cabal_get_back_buffer`, `cabal_swap_buffers` | `src/main.c` | `picocalc/main.c` and the pool |
+| `cabal_get_framebuffer`, `cabal_get_back_buffer`, `cabal_swap_buffers` | `src/main.c` | `picocalc/video_shim.c` over the pool (§7.2) |
 | `cabal_audio_init`, `_shutdown`, `_set_mixer_callback`, `_process_frame`, `_set_volume`, `_needs_samples`, … | `drivers/audio/audio.c` | `picocalc/audio_shim.c` over the PWM driver (§8) |
 | `ps2kbd_init`, `ps2kbd_flush` | `drivers/ps2/` | `picocalc/input_shim.c`: start and flush the PicoCalc input queue |
 | `main()` | `src/main.c` | `picocalc/main.c` (§13) |
@@ -256,7 +257,6 @@ The expected patch, to be confirmed at M0:
 |---|---|
 | `src/backends/platform/rp2350/rp2350-minimal.cpp` | `cabal_poll_event()` takes its events from the PicoCalc input layer (§9). Its PS/2 path cannot be shimmed honestly: it gets F-keys as private ASCII bytes that never become `CABAL_KEY_F*`, and it wants mouse deltas. `cabal_system_init()` loses the PS/2 and USB start-up. |
 | `src/board_config.h` | M1/M2 layouts replaced by one PicoCalc block. |
-| `drivers/psram_allocator.c` | A third framebuffer slot (§7.2). |
 | `drivers/sdcard/sdcard.c` | `CLK_FAST` made overridable, set to 25 MHz (§10). Its `get_fattime()` (always 0) compiled out in favour of the PicoCalc one (§13.2). |
 | `src/backends/platform/rp2350/rp2350-system.cpp` | `getTimeAndDate()` asks the PicoCalc clock (§13.2), keeping upstream's made-up date as the fallback. `initBackend()` creates the mixer at a literal 44,100 Hz, so the rate comes from the audio shim instead (§8.2; found in M0). |
 | `src/frank_quest_welcome.cpp`, `src/frank_quest_selector.cpp` | Text that names PS/2, mouse clicks or HDMI. |
@@ -376,7 +376,10 @@ under one SIO spinlock, and a dropped-frame counter.
 
 - The buffers stay in PSRAM, in fixed slots below the mspace, as upstream's
   two do, so `psram_reset()` between games leaves them alone. The third
-  slot costs 96 KB of the 8 MB.
+  slot follows upstream's two, at 192 KB, inside the 512 KB that
+  `psram_allocator.c` reserves below the mspace for scratch regions
+  nothing calls any more; so it needs no patch and costs the mspace
+  nothing (found in M2).
 - `cabal_get_back_buffer()` returns the buffer core 0 is filling, claiming
   one if it holds none. `cabal_swap_buffers()` publishes it.
   `cabal_update_screen()` calls both and needs no change.
@@ -401,14 +404,18 @@ on a Plus 2 W at 75 MHz):
 | Full 320×240 | 76,800 | ~18 ms wire and DMA, plus PSRAM reads |
 | Game area only, 320×200 | 64,000 | ~15 ms |
 
-**The PSRAM read is the open question.** HW §9.3 measured a PSRAM-to-SRAM
-copy at about 118 ns a pixel, which would add ~9 ms to a full present if
-it held here, and those reads go through the 16 KB XIP cache that core 0's
-3.6 MB of engine code also needs. M2 measures three ways of reading the
-frame: through the cached window, through the uncached alias `0x15000000`
-after a `xip_cache_clean` of the buffer at publish, and a DMA from PSRAM
-into an SRAM row. It keeps the one that costs core 0 least, measured on
-core 0, not core 1.
+**The PSRAM read, measured in M2** (2026-10-29, Plus 2 W, upstream's
+welcome screen, four builds in one sitting; HW §4.7, §9.3). A full
+320×240 present takes 18.1 ms whichever way the frame is read: the read
+hides behind the wire. What differs is the cost to core 0, whose
+welcome frame rate against a control build that presents nothing (29.9
+frames a second) fell 11 % with the frame read through the cached
+window, 8 % through the uncached alias `0x15000000`, and **6 % by DMA**
+from the uncached alias into an SRAM row a row ahead. The port keeps
+**the DMA** (`PICOCALC_QUEST_FB_READ=2`, the default). Both uncached
+ways need core 0 to clean the buffer's lines out of the XIP cache at
+publish, 0.45–0.69 ms a frame; the other strategies stay selectable for
+M8 to measure again under real engines.
 
 Adventure games redraw at roughly 6–20 frames a second, so even a full
 present each frame leaves core 1 idle much of the time. Dirty-row
@@ -698,8 +705,11 @@ What the port adds, **estimated**:
 | **Total added** | **~16 KB** |
 | Removed: HDMI, I²S, PS/2, USB HID buffers and code | to be measured |
 
-Core 1's 4 KB stack must hold the presenter, the southbridge and the log
-pump; M2 measures its high-water mark with a painted stack.
+Core 1's stack is **2 KB**, not the 4 KB of SCRATCH_X: the SDK's
+`multicore_launch_core1()` takes `PICO_CORE1_STACK_SIZE` (0x800) below
+`__StackOneTop` (found in M2, HW §9.5). Painted before launch, the
+presenter, the southbridge, the log pump and the heartbeat took it to 660
+bytes in M2; the heartbeat reports it.
 
 SRAM placement of hot engine code (M8) spends whatever is left, in measured
 tiers.
@@ -708,9 +718,9 @@ tiers.
 
 | Region | Upstream | Port |
 |---|---:|---:|
-| Framebuffer slots | 2 × 96 KB | 3 × 96 KB |
-| Scratch | 512 KB | 512 KB |
-| dlmalloc mspace (all engine allocations) | the rest | the rest, 96 KB less |
+| Framebuffer slots, at the base | 2 × 96 KB | 3 × 96 KB |
+| Reserved below the mspace (slots included) | 512 KB | 512 KB |
+| dlmalloc mspace (all engine allocations) | the rest, 7,680 KB | the same |
 
 ### 12.3 Flash
 
@@ -964,7 +974,9 @@ PSRAM verify time, die temperature after a minute.
 - The frame pool (§7.2) with its host test; the `graphics_*` shims; the
   palette with the frame.
 - Core 1 launched; the presenter (§7.3) at y = 40.
-- Upstream's welcome screen runs; it auto-advances after 10 s.
+- Upstream's welcome screen runs. It ends when its ticker has scrolled
+  past, about 88 s, by upstream's design (found in M2: the 10 s passed to
+  it is only a minimum).
 
 **Done when** the welcome animation plays, centred, with correct colours,
 on the panel. **Measured**: present time full-frame, frames presented and
@@ -1099,12 +1111,12 @@ Every value the port depends on that has not been checked on this hardware
 | F6–F10 codes `0x86`–`0x90` | F7–F9 = `0x87`–`0x89` assumed | HW §6.2 (F6, F10 observed) | medium | M3 |
 | Ctrl+Alt+Del delivered by the MCU | yes | MCU keymap source, not observed | low | M3 |
 | Mixer half fits 14 ms with OPL at 300 MHz | yes | none | low | M5 |
-| PSRAM frame read cost | ~9 ms a full frame | HW §9.3 (a different copy) | low | M2 |
+| PSRAM frame read cost | hidden behind the wire; 6 % of core 0 by DMA | measured, M2 (§7.3) | high | Confirmed 2026-10-29; M8 measures under engines |
 | UF2 Loader's app partition holds 3.6 MB | yes | not checked | low | M9 |
 | POWMAN timer unaffected by the move to 300 MHz | yes | read either side of the switch, M1 | high | Confirmed 2026-10-29 |
 | Shell's clock record survives into the port and reads correctly | yes | read at boot, M1, after a reset over SWD | high | Confirmed 2026-10-29; a launch from the shell checked in M7 |
 | Upstream's SRAM use leaves room for the port | yes; 342,920 bytes left | measured, M0 build | high | Confirmed 2026-10-29 |
-| Core 1 stack of 4 KB is enough | yes | none | medium | M2 |
+| Core 1 stack of 2 KB is enough | yes; 660 bytes used | painted stack, M2 | high | Confirmed 2026-10-29; watched in the heartbeat |
 
 ---
 
