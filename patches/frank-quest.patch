@@ -125,6 +125,206 @@
          return true;
      }
  
+--- a/src/backends/platform/rp2350/rp2350-system.cpp
++++ b/src/backends/platform/rp2350/rp2350-system.cpp
+@@ -43,6 +43,33 @@
+ 	if (g_mixer) {
+ 		g_mixer->mixCallback(stream, len);
+ 	}
++}
++#endif
++
++// PicoCalc: updateScreen() copies and publishes a frame only when
++// something it shows has changed since the last one (picocalc-quest
++// design.md §7.2): anything that writes the screen or the overlay, the
++// palette, and the cursor's shape, place and visibility. Engines call
++// updateScreen() far more often than they draw, and each frame is a
++// 64 KB copy in PSRAM. One OSystem exists at a time.
++static bool s_screenDirty = true;
++static int s_shownMouseX = -1, s_shownMouseY = -1;
++static bool s_shownMouseVisible = false;
++
++extern "C" void picocalc_fatal_message(const char *message);
++
++#if PICOCALC_QUEST_SCREEN_CHECK
++// The diagnostic build's check that the skip misses nothing: the shown
++// surface's checksum at each frame, compared at each skip.
++static uint32 s_shownSum;
++static uint32 s_missed, s_missedReported, s_missedAt;
++
++static uint32 screenSum(const Graphics::Surface &s) {
++	const uint32 *p = (const uint32 *)s.getPixels();
++	uint32 sum = 0;
++	for (int i = 0, n = s.getPitch() * s.getHeight() / 4; i < n; i++)
++		sum = (sum << 5 | sum >> 27) ^ p[i];
++	return sum;
+ }
+ #endif
+ 
+@@ -61,6 +88,7 @@
+ 
+ 	memset(&_cursor, 0, sizeof(_cursor));
+ 	memset(_palette, 0, sizeof(_palette));
++	s_screenDirty = true;
+ }
+ 
+ OSystem_RP2350::~OSystem_RP2350() {
+@@ -207,6 +235,7 @@
+ 
+ 	// Create overlay surface (same size, 8bpp for simplicity)
+ 	_overlay.create(width, height, Graphics::PixelFormat::createFormatCLUT8());
++	s_screenDirty = true;
+ }
+ 
+ int16 OSystem_RP2350::getHeight() {
+@@ -249,9 +278,12 @@
+ 		src += pitch;
+ 		dst += dstPitch;
+ 	}
++	s_screenDirty = true;
+ }
+ 
+ Graphics::Surface *OSystem_RP2350::lockScreen() {
++	// The engine may write anywhere until it unlocks.
++	s_screenDirty = true;
+ 	return &_screen;
+ }
+ 
+@@ -263,31 +295,63 @@
+ 	if (_screen.getPixels()) {
+ 		memset(_screen.getPixels(), col, _screen.getWidth() * _screen.getHeight());
+ 	}
++	s_screenDirty = true;
+ }
+ 
+ void OSystem_RP2350::updateScreen() {
+-	// Update palette if needed
+-	updatePalette();
++	bool changed = s_screenDirty || _paletteDirty ||
++	               _mouseVisible != s_shownMouseVisible ||
++	               (_mouseVisible && (_mouseX != s_shownMouseX || _mouseY != s_shownMouseY));
++	if (changed) {
++		s_screenDirty = false;
++		s_shownMouseX = _mouseX;
++		s_shownMouseY = _mouseY;
++		s_shownMouseVisible = _mouseVisible;
+ 
+-	// Copy to minimal backend
+-	CabalSurface *cabalScreen = cabal_lock_screen();
+-	if (cabalScreen && cabalScreen->pixels && _screen.getPixels()) {
+-		const byte *src;
+-		if (_overlayVisible && _overlay.getPixels()) {
+-			src = (const byte *)_overlay.getPixels();
+-		} else {
+-			src = (const byte *)_screen.getPixels();
++		// Update palette if needed
++		updatePalette();
++
++		// PicoCalc: the minimal backend reads this surface directly for
++		// the one frame, in place of a copy into its own (§7.2).
++		CabalSurface *cabalScreen = cabal_lock_screen();
++		uint8 *own = cabalScreen ? cabalScreen->pixels : nullptr;
++		if (cabalScreen && own && _screen.getPixels()) {
++			const Graphics::Surface &shown =
++				(_overlayVisible && _overlay.getPixels()) ? _overlay : _screen;
++			if (shown.getPitch() == cabalScreen->pitch) {
++				cabalScreen->pixels = (uint8 *)shown.getPixels();
++			} else {
++				memcpy(own, shown.getPixels(), _screenWidth * _screenHeight);
++			}
+ 		}
+-		memcpy(cabalScreen->pixels, src, _screenWidth * _screenHeight);
+-	}
+-	cabal_unlock_screen();
+ 
+-	// Update cursor position
+-	cabal_set_mouse_pos(_mouseX, _mouseY);
++		// Update cursor position
++		cabal_set_mouse_pos(_mouseX, _mouseY);
+ 
+-	// Push to display
+-	cabal_update_screen();
++		// Push to display
++		cabal_update_screen();
+ 
++		if (cabalScreen) cabalScreen->pixels = own;
++		cabal_unlock_screen();
++#if PICOCALC_QUEST_SCREEN_CHECK
++		if (_screen.getPixels())
++			s_shownSum = screenSum((_overlayVisible && _overlay.getPixels()) ? _overlay : _screen);
++	} else if (_screen.getPixels()) {
++		uint32 sum = screenSum((_overlayVisible && _overlay.getPixels()) ? _overlay : _screen);
++		if (sum != s_shownSum) {
++			s_shownSum = sum;
++			s_missed++;
++		}
++		uint32 now = getMillis();
++		if (s_missed != s_missedReported && now - s_missedAt >= 1000) {
++			printf("picocalc-quest: screen check: %lu change(s) nothing marked\n",
++			       (unsigned long)(s_missed - s_missedReported));
++			s_missedReported = s_missed;
++			s_missedAt = now;
++		}
++#endif
++	}
++
+ 	// Drive the DefaultTimerManager — SCI's music/sound engine and
+ 	// several other subsystems register ~60 Hz callbacks here, and
+ 	// without the pulse cutscenes and fades stall mid-sequence.
+@@ -308,11 +372,13 @@
+ 
+ void OSystem_RP2350::showOverlay() {
+ 	_overlayVisible = true;
++	s_screenDirty = true;
+ 	cabal_show_overlay();
+ }
+ 
+ void OSystem_RP2350::hideOverlay() {
+ 	_overlayVisible = false;
++	s_screenDirty = true;
+ 	cabal_hide_overlay();
+ }
+ 
+@@ -325,6 +391,7 @@
+ 		// Copy screen to overlay
+ 		memcpy(_overlay.getPixels(), _screen.getPixels(), _screenWidth * _screenHeight);
+ 	}
++	s_screenDirty = true;
+ }
+ 
+ void OSystem_RP2350::grabOverlay(void *buf, int pitch) {
+@@ -352,6 +419,7 @@
+ 		src += pitch;
+ 		dst += dstPitch;
+ 	}
++	s_screenDirty = true;
+ }
+ 
+ int16 OSystem_RP2350::getOverlayHeight() {
+@@ -383,6 +451,15 @@
+ void OSystem_RP2350::setMouseCursor(const void *buf, uint w, uint h, int hotspotX, int hotspotY,
+                                     uint32 keycolor, bool dontScale,
+                                     const Graphics::PixelFormat *format) {
++	// PicoCalc: SCUMM sets the same cursor every frame; only a new one
++	// needs a frame (above), and only a new one is logged.
++	if (_cursor.data && buf && _cursor.w == (int)w && _cursor.h == (int)h &&
++	    _cursor.hotX == hotspotX && _cursor.hotY == hotspotY &&
++	    _cursor.keycolor == keycolor && memcmp(_cursor.data, buf, w * h) == 0) {
++		return;
++	}
++	s_screenDirty = true;
++
+ 	if (_cursor.data) {
+ 		delete[] _cursor.data;
+ 	}
+@@ -587,4 +664,7 @@
+ 
+ void OSystem_RP2350::logMessage(LogMessageType::Type type, const char *message) {
+ 	printf("%s\n", message);
++	// PicoCalc: kept for the page shown when error() ends the program.
++	if (type == LogMessageType::kError)
++		picocalc_fatal_message(message);
+ }
 --- a/src/board_config.h
 +++ b/src/board_config.h
 @@ -15,39 +15,25 @@
@@ -283,3 +483,313 @@
  // Display Configuration
  //=============================================================================
  
+--- a/src/engines/gob/detection/detection.cpp
++++ b/src/engines/gob/detection/detection.cpp
+@@ -223,3 +223,9 @@
+ }
+ 
+ } // End of namespace Gob
++
++// PicoCalc: the table, for picocalc-quest's launcher (frank_quest_main.cpp),
++// which starts engines without a detector and looks its game up here.
++const Gob::GOBGameDescription *frank_quest_gob_descriptions() {
++	return Gob::gameDescriptions;
++}
+--- a/src/engines/kyra/detection.cpp
++++ b/src/engines/kyra/detection.cpp
+@@ -342,3 +342,9 @@
+ #else
+ 	REGISTER_PLUGIN_STATIC(KYRA, PLUGIN_TYPE_ENGINE, KyraMetaEngine);
+ #endif
++
++// PicoCalc: the table, for picocalc-quest's launcher (frank_quest_main.cpp),
++// which starts engines without a detector and looks its game up here.
++const KYRAGameDescription *frank_quest_kyra_descriptions() {
++	return adGameDescs;
++}
+--- a/src/engines/sci/detection.cpp
++++ b/src/engines/sci/detection.cpp
+@@ -843,3 +843,9 @@
+ #else
+ 	REGISTER_PLUGIN_STATIC(SCI, PLUGIN_TYPE_ENGINE, Sci::SciMetaEngine);
+ #endif
++
++// PicoCalc: the table, for picocalc-quest's launcher (frank_quest_main.cpp),
++// which starts engines without a detector and looks its game up here.
++const ADGameDescription *frank_quest_sci_descriptions() {
++	return Sci::Sci::SciGameDescriptions;  // the tables open Sci inside Sci
++}
+--- a/src/frank_quest_main.cpp
++++ b/src/frank_quest_main.cpp
+@@ -29,6 +29,8 @@
+ #include "engines/advancedDetector.h"
+ #include "base/plugins.h"
+ #include "common/fs.h"
++#include "common/file.h"
++#include "common/md5.h"
+ #include "common/archive.h"
+ 
+ // GOB Engine includes
+@@ -257,6 +259,120 @@
+ 
+ // GOB (Gobliins) game launcher with explicit version
+ // Returns true if a game was found and launched
++// PicoCalc: upstream starts each engine with a description it makes up,
++// one version per game whatever the files are (a CD release run as the
++// floppy, say). These find the folder's game in the engine's own ScummVM
++// table instead, as ScummVM's detector would for one folder: every file
++// an entry names must be there, with the MD5 of its first md5Bytes bytes
++// and, where the entry gives one, its size. DOS and English are preferred
++// among entries that match. The tables are in the engines' detection.cpp.
++const Gob::GOBGameDescription *frank_quest_gob_descriptions();
++const ADGameDescription *frank_quest_sci_descriptions();
++const KYRAGameDescription *frank_quest_kyra_descriptions();
++
++namespace {
++
++// The files looked at so far, for this launch: each is read once.
++struct DetectFile {
++    Common::String name, md5;
++    int32 size;       // -1: not in the folder
++};
++Common::Array<DetectFile> s_detectFiles;
++uint32 s_detectBytes;
++
++const DetectFile &detectFile(const char *name) {
++    for (uint i = 0; i < s_detectFiles.size(); i++)
++        if (s_detectFiles[i].name.equalsIgnoreCase(name)) return s_detectFiles[i];
++    DetectFile f;
++    f.name = name;
++    f.size = -1;
++    Common::File file;
++    if (file.open(name)) {
++        f.size = file.size();
++        f.md5 = Common::computeStreamMD5AsString(file, s_detectBytes);
++    }
++    s_detectFiles.push_back(f);
++    return s_detectFiles.back();
++}
++
++void detectBegin(uint32 md5Bytes) {
++    s_detectFiles.clear();
++    s_detectBytes = md5Bytes;
++}
++
++// -1 if the entry does not match; otherwise higher is better.
++int detectScore(const ADGameDescription &d) {
++    if (!d.filesDescriptions[0].fileName) return -1;
++    for (const ADGameFileDescription *f = d.filesDescriptions; f->fileName; f++) {
++        const DetectFile &got = detectFile(f->fileName);
++        if (got.size < 0) return -1;
++        if (f->md5 && got.md5 != f->md5) return -1;
++        if (f->fileSize != -1 && f->fileSize != got.size) return -1;
++    }
++    int score = 0;
++    if (d.platform == Common::kPlatformDOS) score += 2;
++    if (d.language == Common::EN_ANY || d.language == Common::EN_USA ||
++        d.language == Common::EN_GRB) score += 1;
++    return score;
++}
++
++void detectReport(const char *engine, const ADGameDescription *d) {
++    if (d)
++        printf("%s: ScummVM's entry: %s (%s), language %d, platform %d, flags 0x%lx\n",
++               engine, d->gameid, d->extra ? d->extra : "", (int)d->language,
++               (int)d->platform, (unsigned long)d->flags);
++    else
++        printf("%s: no entry in ScummVM's table matches; upstream's defaults\n", engine);
++    s_detectFiles.clear();
++}
++
++// Gob: gob<N> and gob<N>cd only, by intro.stk and the rest, 5000 bytes.
++const Gob::GOBGameDescription *findGobDescription(int gobVersion) {
++    char floppy[8], cd[8];
++    snprintf(floppy, sizeof(floppy), "gob%d", gobVersion);
++    snprintf(cd, sizeof(cd), "gob%dcd", gobVersion);
++    detectBegin(5000);
++    const Gob::GOBGameDescription *best = nullptr;
++    int bestScore = -1;
++    for (const Gob::GOBGameDescription *d = frank_quest_gob_descriptions(); d->desc.gameid; d++) {
++        if (strcmp(d->desc.gameid, floppy) != 0 && strcmp(d->desc.gameid, cd) != 0) continue;
++        int score = detectScore(d->desc);
++        if (score > bestScore) { best = d; bestScore = score; }
++    }
++    detectReport("GOB", best ? &best->desc : nullptr);
++    return best;
++}
++
++// SCI: any entry whose files match, 5000 bytes, as ScummVM's default.
++const ADGameDescription *findSciDescription() {
++    detectBegin(5000);
++    const ADGameDescription *best = nullptr;
++    int bestScore = -1;
++    for (const ADGameDescription *d = frank_quest_sci_descriptions(); d->gameid; d++) {
++        int score = detectScore(*d);
++        if (score > bestScore) { best = d; bestScore = score; }
++    }
++    detectReport("SCI", best);
++    return best;
++}
++
++// Kyra: kyra1 or kyra2, 1 MB, as Kyra's detector reads.
++const KYRAGameDescription *findKyraDescription(int gameId) {
++    const char *want = gameId == 1 ? "kyra2" : "kyra1";
++    detectBegin(1024 * 1024);
++    const KYRAGameDescription *best = nullptr;
++    int bestScore = -1;
++    for (const KYRAGameDescription *d = frank_quest_kyra_descriptions(); d->desc.gameid; d++) {
++        if (strcmp(d->desc.gameid, want) != 0) continue;
++        int score = detectScore(d->desc);
++        if (score > bestScore) { best = d; bestScore = score; }
++    }
++    detectReport("KYRA", best ? &best->desc : nullptr);
++    return best;
++}
++
++} // namespace
++
+ static bool launchGOBGameWithVersion(const char *gamePath, int gobVersion) {
+     printf("GOB: Launching game from %s as Gobliiins %d\n", gamePath, gobVersion);
+ 
+@@ -326,7 +442,13 @@
+     memset(&gameDesc, 0, sizeof(gameDesc));
+ 
+     // Set up the ADGameDescription part based on detected version
+-    if (gobVersion == 3) {
++    const Gob::GOBGameDescription *found = findGobDescription(gobVersion);
++    if (found) {
++        gameDesc = *found;
++        printf("GOB: Configuring as ScummVM's %s (%s), features 0x%lx\n",
++               gameDesc.desc.gameid, gameDesc.desc.extra ? gameDesc.desc.extra : "",
++               (unsigned long)gameDesc.features);
++    } else if (gobVersion == 3) {
+         gameDesc.desc.gameid = "gob3";
+         gameDesc.desc.extra = "VGA";
+         gameDesc.gameType = Gob::kGameTypeGob3;
+@@ -346,13 +468,15 @@
+         printf("GOB: Configuring for Gobliiins 1 (EGA)\n");
+     }
+ 
+-    gameDesc.desc.language = Common::EN_ANY;
+-    gameDesc.desc.platform = Common::kPlatformDOS;
+-    gameDesc.desc.flags = ADGF_NO_FLAGS;
+-    gameDesc.desc.guioptions = "";
+-    gameDesc.startStkBase = 0;
+-    gameDesc.startTotBase = 0;
+-    gameDesc.demoIndex = 0;
++    if (!found) {
++        gameDesc.desc.language = Common::EN_ANY;
++        gameDesc.desc.platform = Common::kPlatformDOS;
++        gameDesc.desc.flags = ADGF_NO_FLAGS;
++        gameDesc.desc.guioptions = "";
++        gameDesc.startStkBase = 0;
++        gameDesc.startTotBase = 0;
++        gameDesc.demoIndex = 0;
++    }
+ 
+     printf("GOB: Creating engine instance...\n");
+ 
+@@ -378,9 +502,15 @@
+ static bool launchAGIGame(const char *gamePath) {
+     printf("AGI: Attempting to launch game from %s\n", gamePath);
+ 
++    // PicoCalc: a domain per folder, quest-<folder>, so each AGI game's
++    // saves are its own; /quest/agi keeps upstream's quest-agi. The path
++    // goes in it, so it is set second.
++    const char *folder = strrchr(gamePath, '/');
++    Common::String domain = Common::String("quest-") + (folder ? folder + 1 : gamePath);
++    ConfMan.setActiveDomain(domain);
++
+     // Set up the game path in config manager
+     ConfMan.set("path", gamePath);
+-    ConfMan.setActiveDomain("quest-agi");
+ 
+     // Set default audio/config values that Engine::syncSoundSettings() expects
+     ConfMan.setInt("music_volume", 192);
+@@ -614,20 +744,30 @@
+     static KYRAGameDescription gameDesc;
+     memset(&gameDesc, 0, sizeof(gameDesc));
+ 
+-    gameDesc.desc.gameid    = (gameId == 1) ? "kyra2" : "kyra1";
+-    gameDesc.desc.extra     = "Floppy";
+-    gameDesc.desc.language  = Common::EN_ANY;
+-    gameDesc.desc.platform  = Common::kPlatformDOS;
+-    gameDesc.desc.flags     = ADGF_NO_FLAGS;
+-    gameDesc.desc.guioptions = "";
++    if (const KYRAGameDescription *found = findKyraDescription(gameId)) {
++        // As KyraMetaEngine::createInstance(): the table leaves these to
++        // the entry's description.
++        gameDesc = *found;
++        gameDesc.flags.lang = gameDesc.desc.language;
++        gameDesc.flags.platform = gameDesc.desc.platform;
++        if (gameDesc.flags.lang == Common::UNK_LANG)
++            gameDesc.flags.lang = Common::EN_ANY;
++    } else {
++        gameDesc.desc.gameid    = (gameId == 1) ? "kyra2" : "kyra1";
++        gameDesc.desc.extra     = "Floppy";
++        gameDesc.desc.language  = Common::EN_ANY;
++        gameDesc.desc.platform  = Common::kPlatformDOS;
++        gameDesc.desc.flags     = ADGF_NO_FLAGS;
++        gameDesc.desc.guioptions = "";
+ 
+-    gameDesc.flags.gameID      = (gameId == 1) ? Kyra::GI_KYRA2 : Kyra::GI_KYRA1;
+-    gameDesc.flags.lang        = Common::EN_ANY;
+-    gameDesc.flags.platform    = Common::kPlatformDOS;
+-    gameDesc.flags.isTalkie    = false;
+-    gameDesc.flags.isDemo      = false;
+-    gameDesc.flags.useHiRes    = false;
+-    gameDesc.flags.useDigSound = false;
++        gameDesc.flags.gameID      = (gameId == 1) ? Kyra::GI_KYRA2 : Kyra::GI_KYRA1;
++        gameDesc.flags.lang        = Common::EN_ANY;
++        gameDesc.flags.platform    = Common::kPlatformDOS;
++        gameDesc.flags.isTalkie    = false;
++        gameDesc.flags.isDemo      = false;
++        gameDesc.flags.useHiRes    = false;
++        gameDesc.flags.useDigSound = false;
++    }
+ 
+     printf("KYRA: Creating engine...\n");
+     ::Engine *engine = (gameId == 1)
+@@ -763,12 +903,16 @@
+ 
+     static ADGameDescription gameDesc;
+     memset(&gameDesc, 0, sizeof(gameDesc));
+-    gameDesc.gameid = gameIdStr ? gameIdStr : "sci";
+-    gameDesc.extra = "";
+-    gameDesc.language = Common::EN_ANY;
+-    gameDesc.platform = Common::kPlatformDOS;
+-    gameDesc.flags = ADGF_NO_FLAGS;
+-    gameDesc.guioptions = GUIO_NONE;
++    if (const ADGameDescription *found = findSciDescription()) {
++        gameDesc = *found;
++    } else {
++        gameDesc.gameid = gameIdStr ? gameIdStr : "sci";
++        gameDesc.extra = "";
++        gameDesc.language = Common::EN_ANY;
++        gameDesc.platform = Common::kPlatformDOS;
++        gameDesc.flags = ADGF_NO_FLAGS;
++        gameDesc.guioptions = GUIO_NONE;
++    }
+ 
+     ConfMan.set("gameid", gameDesc.gameid);
+ 
+--- a/src/frank_quest_selector.cpp
++++ b/src/frank_quest_selector.cpp
+@@ -72,6 +72,17 @@
+ 	{"ft",       "ft.la0",        "Full Throttle",                    QuestEngine::Scumm, 0, "ft"},
+ 	{"fulltp",   "ft.la0",        "Full Throttle",                    QuestEngine::Scumm, 0, "fulltp"},
+ 
++	// --- AGI (Sierra), by name: PicoCalc. Before SCI, since SCI remade
++	// several of them under the same name; LOGDIR is AGI's and not SCI's.
++	// Each has its own config domain, so its own saves (main.cpp). ---
++	{"kq1",      "LOGDIR", "King's Quest I (AGI)",        QuestEngine::Agi, 0, ""},
++	{"kq2",      "LOGDIR", "King's Quest II",             QuestEngine::Agi, 0, ""},
++	{"kq3",      "LOGDIR", "King's Quest III",            QuestEngine::Agi, 0, ""},
++	{"sq1",      "LOGDIR", "Space Quest I (AGI)",         QuestEngine::Agi, 0, ""},
++	{"sq2",      "LOGDIR", "Space Quest II",              QuestEngine::Agi, 0, ""},
++	{"lsl1",     "LOGDIR", "Leisure Suit Larry 1 (AGI)",  QuestEngine::Agi, 0, ""},
++	{"pq1",      "LOGDIR", "Police Quest I (AGI)",        QuestEngine::Agi, 0, ""},
++
+ 	// --- SCI (Sierra) ---
+ 	{"kq1",      NULL, "King's Quest I",                 QuestEngine::Sci, 0, "kq1"},
+ 	{"kq4",      NULL, "King's Quest IV",                QuestEngine::Sci, 0, "kq4"},

@@ -10,6 +10,7 @@
  * Audio comes in M5 (§16).
  */
 
+#include <malloc.h>
 #include <stdint.h>
 #include <stdio.h>
 
@@ -47,6 +48,52 @@ void __wrap_cabal_delay(uint32_t ms) {
     g_core0_delay_us += time_us_32() - t0;
 }
 
+/* The same for upstream's screen update, which OSystem calls from
+ * another file: its copy of the game's screen into a frame, the cursor,
+ * and the publish (§7.2). */
+void __real_cabal_update_screen(void);
+void __wrap_cabal_update_screen(void) {
+    uint32_t t0 = time_us_32();
+    __real_cabal_update_screen();
+    g_core0_update_us += time_us_32() - t0;
+    g_core0_updates++;
+}
+
+/* The PSRAM heap, for M4's round trips (§16): upstream's allocator keeps
+ * its mspace in a static, so the link wraps the mspace's creation to
+ * keep a copy, and the allocator stays unpatched. Upstream creates a new
+ * one on every return to the selector. */
+typedef void *mspace;
+struct dl_mallinfo {
+    size_t arena, ordblks, smblks, hblks, hblkhd, usmblks, fsmblks, uordblks, fordblks, keepcost;
+};
+mspace __real_create_mspace_with_base(void *base, size_t capacity, int locked);
+struct dl_mallinfo mspace_mallinfo(mspace msp);
+
+static mspace s_heap;
+
+mspace __wrap_create_mspace_with_base(void *base, size_t capacity, int locked) {
+    s_heap = __real_create_mspace_with_base(base, capacity, locked);
+    return s_heap;
+}
+
+/* Both heaps as the selector starts, on core 0: the PSRAM mspace and
+ * newlib's in SRAM, which takes what is allocated before the PSRAM is
+ * up. mspace_mallinfo walks every chunk, so it is not for the heartbeat. */
+static void heap_report(void) {
+    struct mallinfo sram = mallinfo();
+    if (s_heap == NULL) {
+        printf("picocalc-quest: heap: no PSRAM mspace; SRAM heap %lu B in use\n",
+               (unsigned long)sram.uordblks);
+        return;
+    }
+    struct dl_mallinfo psram = mspace_mallinfo(s_heap);
+    printf("picocalc-quest: heap: PSRAM %lu B in use, %lu B free in %lu chunks; "
+           "SRAM heap %lu B in use\n",
+           (unsigned long)psram.uordblks, (unsigned long)psram.fordblks,
+           (unsigned long)psram.ordblks, (unsigned long)sram.uordblks);
+}
+
 /* Upstream's scan of /quest, timed for M3 (§16). The link wraps it by its C++ name, so the selector stays
  * unpatched; QuestGame is opaque here. */
 int __real__Z22frank_quest_scan_gamesP9QuestGamei(void *out, int max_out);
@@ -55,6 +102,7 @@ int __wrap__Z22frank_quest_scan_gamesP9QuestGamei(void *out, int max_out) {
     int n = __real__Z22frank_quest_scan_gamesP9QuestGamei(out, max_out);
     printf("picocalc-quest: /quest scanned in %lu ms, %d game(s)\n",
            (unsigned long)((time_us_32() - t0) / 1000u), n);
+    heap_report();
     return n;
 }
 
@@ -200,9 +248,14 @@ int main(void) {
     printf("  southbridge  : i2c %lu Hz, version %d, a register read %lu us%s\n",
            (unsigned long)g_core1.i2c_hz, g_core1.sb_version, (unsigned long)g_core1.i2c_us,
            g_core1.sb_version < 0 ? "; NOT ANSWERING: switch the PicoCalc off and on" : "");
+#if PICOCALC_QUEST_TEST_PATTERN
     printf("  lcd          : spi %lu Hz, init %lu us, test pattern %lu us\n",
            (unsigned long)g_core1.spi_hz, (unsigned long)g_core1.lcd_us,
            (unsigned long)g_core1.pattern_us);
+#else
+    printf("  lcd          : spi %lu Hz, init %lu us\n",
+           (unsigned long)g_core1.spi_hz, (unsigned long)g_core1.lcd_us);
+#endif
 
     /* The check before anything is stored in the PSRAM. */
     psram_check_t check;

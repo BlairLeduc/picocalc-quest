@@ -237,6 +237,17 @@ memory-mapped window. Do not assume a generic `pico2` build enables it. Three th
   and it contends with your code. §9.3 has the measurement.
 - **Its QMI timing is computed from `clk_sys` once, before `main`.** Change the
   system clock and it is wrong — see §3.
+- **A copy from PSRAM to PSRAM is slow.** On a Pimoroni Pico Plus 2 W at
+  300 MHz with the PSRAM at 100 MHz (divider 3), 2026-10-29, development
+  build: copying a 320×200 8-bit frame (64,000 bytes) from one PSRAM buffer
+  into another with `memcpy` through the cached window, clearing the 12,800
+  bytes above and below it, and cleaning the destination's cache lines took
+  **9.6 ms**, timed around the call: about 8 MB/s. A program that made two
+  such copies on every screen update, at 36–43 updates a second, spent
+  **64–83 % of core 0 in `memcpy` and `memset`** (PC samples, §2.7), and the
+  programs themselves under 5 %. Copying only when the picture had changed,
+  and once instead of twice, brought `memcpy` to 4 %. Count updates against
+  changes before optimising anything else.
 
 Use PSRAM for **capacity** (level data, sprite banks, audio samples, a text
 buffer) and SRAM for the **per-frame working set**.
@@ -352,6 +363,29 @@ underruns. **Measured** on a Plus 2 W, 2026-10-05: 30 such reads over 44 s,
 each a fresh OpenOCD, left the audio's underrun and late-refill counts at 0
 and dropped no video frames. Each read takes about a second, most of it
 OpenOCD starting.
+
+**A profile over SWD, without stopping the core.** The Cortex-M33's DWT
+has a PC sample register, `DWT_PCSR` at `0xE000101C`: each read returns
+the address the core is executing. Set `DEMCR.TRCENA` (bit 24 of
+`0xE000EDFC`) first. OpenOCD started with `init` and no `reset` or `halt`,
+with the core's target selected (`targets rp2350.cm0`, or `cm1`; each core
+has its own register), can read it in a Tcl loop and write the samples to a
+file; `nm -n` turns them into functions. **Measured** on a Plus 2 W at
+300 MHz through a CMSIS-DAP Debug Probe at 5 MHz SWD, 2026-10-29: **about
+4,000 samples a second**, with the program running on and its frame and
+key counters unaffected. A sample of `0xFFFFFFFF` means the core is halted.
+It names only the function the PC is in, not who called it.
+
+**With a debugger attached, a breakpoint halts the core, and the timer
+stops with it.** The SDK's `_exit()` is a `bkpt` loop, so a program that
+calls `exit()` halts its core when the probe has enabled debug (`DHCSR`
+`S_HALT`, bit 17); without the probe, it faults. The RP2350's system
+timer is paused by default while either core is halted in debug, so the
+other core's `busy_wait_us` never returns and it stops too: no log, no
+display, though it is not halted. Seen on a Plus 2 W, 2026-10-29. Read the
+core's `pc`, and the stack for return addresses, to find the caller; a log
+held in an SRAM ring can be dumped over SWD (`dump_image`) to recover the
+last lines the stopped core never sent.
 
 **A memory read over SWD is not atomic against the running core.** A block
 of a few dozen words read while the firmware rewrites it can come back
@@ -930,6 +964,11 @@ you build:
   speech has 4–8, so matching *peaks* leaves speech ~20 dB below a tone in the
   RMS the ear reads as loudness. If you mix synthesis and samples, tune by ear
   and expect the sample to need several times the "correct" gain.
+
+An **OPL2 emulator** costs far more. MAME's YM3812 core, generating at
+44,100 Hz for a game's intro music, took **17 % of core 0** at 300 MHz in
+PC samples on a Plus 2 W (2026-10-29, development build, the output thrown
+away). The cost is per output sample, so it falls with the rate.
 
 For the foreground-to-IRQ handoff, a **lock-free SPSC queue per voice** (one
 reserved slot so full and empty are distinguishable) removes almost all critical
