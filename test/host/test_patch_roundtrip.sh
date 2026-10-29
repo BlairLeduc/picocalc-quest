@@ -85,12 +85,12 @@ repo() {
         echo "skip: no submodule or no patch"
         exit 77
     fi
+    # The files, not the patch's text: GNU and BSD diff choose different
+    # but equivalent hunks for the same edit.
     "$apply" --working --out "$tmp/w" --patch "$patch" >/dev/null
     "$create" --working "$tmp/w" --patch "$tmp/p.patch" >/dev/null
-    cmp -s "$patch" "$tmp/p.patch" || {
-        diff -u "$patch" "$tmp/p.patch" | head -40 >&2
-        fail "patches/frank-quest.patch is not what create_patch.sh makes of it; regenerate it"
-    }
+    "$apply" --working --out "$tmp/w2" --patch "$tmp/p.patch" >/dev/null
+    diff -r "$tmp/w" "$tmp/w2" || fail "the regenerated patch does not reproduce working/"
 }
 
 case "${1:-}" in

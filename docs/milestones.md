@@ -35,8 +35,11 @@ a device.
   command.
 
 **Checked on the host:** `test_patch_roundtrip_synthetic` and
-`test_patch_roundtrip_repo` pass. The second regenerates the committed
-patch from `working/` and compares it byte for byte. `scripts/build.sh`
+`test_patch_roundtrip_repo` pass. The second applies the committed patch,
+regenerates it, and checks that the new patch rebuilds the same files. It
+compares files, not patch text: on CI's first run, GNU `diff` split
+`board_config.h`'s hunks differently from macOS's BSD `diff`, for the same
+edit. `scripts/build.sh`
 in a copy of the tree with no `build/`, `frank-quest/` or `working/` built
 the UF2 in about two minutes. The stamp re-patches
 when the patch changes and not otherwise. `check_sources.sh` reported a
@@ -62,6 +65,7 @@ between builds from the same path.
 - `sdcard.c` does not include `board_config.h`, so the card's pins are
   compile definitions, as upstream's were.
 
-**Not checked:** the scripts under GNU `patch` and `diff` (CI's Ubuntu
-runner); CI itself, which has not yet run; the firmware with CI's Arm GCC
-13.2; `_unlink` deleting a save (M7); anything on the device.
+CI's first firmware build was killed by the runner when an unbounded
+`make -j` ran some 600 compilers at once; CI now runs `-j $(nproc)`.
+
+**Not checked:** the firmware with CI's Arm GCC 13.2, until CI passes; `_unlink` deleting a save (M7); anything on the device.

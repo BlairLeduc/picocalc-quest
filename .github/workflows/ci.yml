@@ -59,7 +59,7 @@ jobs:
       - name: Build
         env:
           PICO_SDK_PATH: ${{ github.workspace }}/pico-sdk
-        run: cmake --build build/pico -j
+        run: cmake --build build/pico -j "$(nproc)"
 
       # The build that ships: no UART (§14.2).
       - name: Build without the UART
@@ -67,7 +67,7 @@ jobs:
           PICO_SDK_PATH: ${{ github.workspace }}/pico-sdk
         run: |
           cmake -S . -B build/pico-release -DCMAKE_BUILD_TYPE=Release -DPICOCALC_QUEST_UART=OFF
-          cmake --build build/pico-release -j
+          cmake --build build/pico-release -j "$(nproc)"
 
       - uses: actions/upload-artifact@v4
         with:
