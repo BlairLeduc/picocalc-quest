@@ -125,7 +125,7 @@ Design around these from the start; each one has cost a project time.
   loses time at power-off. Wall-clock time comes from the network on a W board,
   or from the user. Once set, the RP2350's timer keeps running through a
   system reset (a watchdog reboot, an SWD reset) and through a move of
-  `clk_sys`, since it counts its own 1 kHz tick: on a Pimoroni Pico Plus 2
+  `clk_sys`, since it counts its own 1 kHz tick: on a Pimoroni Pico Plus 2 W
   on 2026-10-29, read on each side of the 150 → 300 MHz switch (PLL, rail and
   flash divider), it advanced 1–2 ms across 1.3–1.6 ms of uptime, as its
   millisecond resolution allows, and agreed with the workstation's UTC.
@@ -227,7 +227,7 @@ memory-mapped window. Do not assume a generic `pico2` build enables it. Three th
   `xip_cache_clean_all()` + `xip_cache_invalidate_all()` to force a real round
   trip, then read back. A marginal QMI configuration then degrades to SRAM-only
   instead of handing your allocator a region that hardfaults on use.
-  It is cheap: on a Pimoroni Pico Plus 2 at 300 MHz with the PSRAM at
+  It is cheap: on a Pimoroni Pico Plus 2 W at 300 MHz with the PSRAM at
   100 MHz (divider 3, RX delay 3), 2026-10-29, a word at every power-of-two
   offset plus 64 KB of pseudo-random words spread over the 8 MB, written,
   read back and written inverted, 32,790 words with three clean-and-invalidate
@@ -481,7 +481,7 @@ writes `qmi_hw->m[0].timing` afresh. The SDK saves and restores the
 PSRAM's chip select (`m[1]`) around these calls, but not the flash's own
 (read from SDK 2.3.1's `hardware_flash/flash.c`). So a divider doubled for
 300 MHz is undone by the next flash command, and the flash then runs at
-100 MHz without any visible fault. **Found** on a Pimoroni Pico Plus 2
+100 MHz without any visible fault. **Found** on a Pimoroni Pico Plus 2 W
 (RP2350B, 16 MB) on 2026-10-29: a JEDEC id read (`0x9F`) made through
 `flash_do_cmd` after the clock went up left the timing at clkdiv 3,
 RX delay 2. Read the flash's ids before raising the clock, or write the

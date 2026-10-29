@@ -4,10 +4,11 @@ What each milestone verified, on which board, on what date, and what was
 not checked, newest first. `design.md` §16 holds each milestone's scope
 and done-when criteria; this file keeps the full record.
 
-**M1 (board bring-up) is run on the board**, on 2026-10-29, on a Pimoroni
-Pico Plus 2 (RP2350B rev 2, 16 MB flash; radio not probed) in a PicoCalc,
-flashed over SWD, with Arm GCC 15.2.Rel1 and SDK 2.3.1, development build.
-**The owner's look at the panel is outstanding.**
+**M1 (board bring-up) is done**, on 2026-10-29, on a Pimoroni Pico Plus 2 W
+(RP2350B rev 2, 16 MB flash; the image does not probe the radio, the
+owner named the board) in a PicoCalc, flashed over SWD, with Arm GCC
+15.2.Rel1 and SDK 2.3.1, development build. The test pattern checked on
+the panel by the owner.
 
 - **Clocks** (`picocalc/board.c`, from pico-atom's 300 MHz path, §11.1):
   150 MHz, rail to 1.20 V, the flash's QMI divider and RX delay doubled
@@ -42,7 +43,9 @@ not committed):
 - Southbridge: I²C 10,000 Hz, firmware version 0, a register read
   4,840–4,853 µs; battery 100 %.
 - LCD: SPI **75,000,000 Hz as configured** (not measured on SCK); init,
-  reset to DISPON, 424 ms; the test pattern 19.4 ms.
+  reset to DISPON, 424 ms; the test pattern 19.4 ms. **The owner checked
+  the pattern on the panel**: the four corners' colours, the border on all
+  four edges, the colour bars and the grey ramp, all as drawn.
 - **The shell's clock**: set (the POWMAN record survived the SWD reset),
   read as 2026-10-29 14:18:09 UTC, offset +0:00, matching the workstation's
   UTC to the minute; across the clock change it moved 1–2 ms in 1.3–1.6 ms of
@@ -75,11 +78,11 @@ cache; M2 measures it properly.
 - The crash record's magic reads as garbage at a cold boot, as expected of
   `.uninitialized_data`; upstream prints it and goes on.
 
-**Not checked:** the test pattern on the panel (the owner's look: corners,
-colours, edges); started from the shell, the time against the shell's own
-display (the clock was read after an SWD reset, not a shell launch); the
-release build on the board (built clean, not flashed); the temperature
-under load.
+**Not checked:** started from the shell, the time against the shell's own
+display (the clock was read after an SWD reset, not a shell launch; moved
+to M7 by the owner, whose saves check it); the release build on the board
+(built clean, not flashed); the temperature under load; the image on a
+Plus 2 without the W.
 
 **M0 (skeleton, patch pipeline, CI) is built**, on 2026-10-29, on macOS
 with Arm GCC 15.2.Rel1, Pico SDK 2.3.1 and BSD `patch` and `diff`. Not on
