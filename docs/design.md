@@ -24,7 +24,10 @@ with empty shims. M1 done on a Plus 2 W: 300 MHz at 1.20 V, the log
 ring, banner and heartbeat over UART0, PSRAM checked, the southbridge, and
 the LCD's test pattern, checked on the panel by the owner. M2 done on the
 same board: the frame pool and the presenter on core 1, upstream's welcome
-screen on the panel, checked by the owner (§16, `milestones.md`). Upstream is pinned at commit
+screen on the panel, checked by the owner. M3 done on the same board: the
+card mounted and checked before upstream starts, with a page for each
+failure; the keyboard through the key map into upstream's poll; every key
+and Ctrl+Alt+Del checked by the owner (§16, `milestones.md`). Upstream is pinned at commit
 `949301b6ef87a5482340167378cd102fcdb82ef2` (2026-05-12, release 1.00).
 
 **Contents**
@@ -97,7 +100,7 @@ on them.
 | D6 | 2026-10-29 | Reuse the PicoCalc drivers from `pico-oric` (same author, GPL-3.0) by copy, rename, re-verify (EL §14.6). | Proposed |
 | D7 | 2026-10-29 | Licence the port GPL-3.0-or-later. Upstream's own code is GPL-3.0-or-later and its ScummVM code GPL-2.0-or-later, so the combination can only go out under GPL-3.0. | Proposed |
 | D8 | 2026-10-29 | Keyboard pointer: arrows move it; `]` is the left button and `[` the right; **Alt+M** switches the arrows between pointer and arrow keys; each engine has a default mode (§9). | Proposed; settled by play-testing in M6 |
-| D9 | 2026-10-29 | Keep upstream's quit-to-selector chord, Ctrl+Alt+Del, if the keyboard MCU delivers it (§9.5). | Proposed; checked in M3 |
+| D9 | 2026-10-29 | Keep upstream's quit-to-selector chord, Ctrl+Alt+Del, if the keyboard MCU delivers it (§9.5). | Settled 2026-10-29: delivered, used by the owner in M3 |
 | D10 | 2026-10-29 | No internal flash writes. Settings and saves live on the card (HW §7.1, EL §8.7). | Proposed |
 | D11 | 2026-10-29 | Work with the PicoCalc shell as Rogue does: leave to the shell (or UF2 Loader's menu) through `picocalc_shell.h`, and take the date and time from the clock the shell keeps (§13). | Settled |
 | D12 | 2026-10-29 | The development UART is UART0 on GP2 (TX) and GP3 (RX), through the pins' UART_AUX function, 115200 8-N-1, as the shell's. GP4/GP5 are `i2c0`'s, for the shell's DS3231, and the port leaves them alone (§4, §14.1). | Settled |
@@ -255,7 +258,7 @@ The expected patch, to be confirmed at M0:
 
 | File | Change |
 |---|---|
-| `src/backends/platform/rp2350/rp2350-minimal.cpp` | `cabal_poll_event()` takes its events from the PicoCalc input layer (§9). Its PS/2 path cannot be shimmed honestly: it gets F-keys as private ASCII bytes that never become `CABAL_KEY_F*`, and it wants mouse deltas. `cabal_system_init()` loses the PS/2 and USB start-up. |
+| `src/backends/platform/rp2350/rp2350-minimal.cpp` | `cabal_poll_event()` takes its key events from the PicoCalc input layer (§9; done in M3, keys only: the mouse block stays, fed nothing, until M6). Its PS/2 path cannot be shimmed honestly: it gets F-keys as private ASCII bytes that never become `CABAL_KEY_F*`, and it wants mouse deltas. `cabal_system_init()` loses the PS/2 mouse start-up (M3). |
 | `src/board_config.h` | M1/M2 layouts replaced by one PicoCalc block. |
 | `drivers/sdcard/sdcard.c` | `CLK_FAST` made overridable, set to 25 MHz (§10). Its `get_fattime()` (always 0) compiled out in favour of the PicoCalc one (§13.2). |
 | `src/backends/platform/rp2350/rp2350-system.cpp` | `getTimeAndDate()` asks the PicoCalc clock (§13.2), keeping upstream's made-up date as the fallback. `initBackend()` creates the mixer at a literal 44,100 Hz, so the rate comes from the audio shim instead (§8.2; found in M0). |
@@ -339,6 +342,11 @@ Upstream runs on one core. The port splits it as the emulators do
 - **Everything on the audio refill path is in SRAM**, or measured to be
   harmless in flash (§8.3).
 - **No flash writes** (D10).
+- **No reset with a southbridge transaction in flight.** A reset of the
+  RP2350 part-way through one can leave the MCU answering nothing until
+  the PicoCalc is switched off and on (found in M3, HW §6.1). Every
+  reboot the port makes goes through `picocalc_restart()`, which parks
+  core 1 between transactions first; M7's exit to the shell must too.
 
 ---
 
@@ -488,10 +496,14 @@ converter and the OPL emulator in SRAM (§16, M8); a lower mixer rate (TOP
 
 ### 9.1 From the southbridge to the engine
 
-Core 1 drains the southbridge FIFO about every 25 ms (HW §6.1, 4.8 ms a
-transaction), builds the held-key set from press and release, canonicalises
-shifted releases, and pushes **press/release events** with their translated
-codes into an SPSC queue to core 0 (EL §7.1, HW §6.2). Auto-repeat arrives
+Core 1 drains the southbridge FIFO every 25 ms (HW §6.1, 4.8 ms a
+transaction) and pushes the MCU's own `[state, code]` pairs, each with the
+time it read them, into a 64-entry SPSC ring to core 0 (`kbd.c`; EL §7.1).
+Core 0 owns the key map (`keymap.c`): the held-key set built from press
+and release, canonicalised shifted releases, and the translation to the
+engine's codes (HW §6.2). That is a change from the first plan, which put
+the held set on core 1: the pointer (§9.3) reads the held set on core 0,
+so one owner there is simpler, and the map is pure code with a host test. Auto-repeat arrives
 from the MCU as extra presses; they are kept, flagged as repeats, because
 typing in a parser game wants them and the pointer does not.
 
@@ -517,7 +529,14 @@ pointer state (§9.3) and returns `CabalEvent`s: key down and up with
 | `[`, `]` | ASCII | Pointer buttons in pointer mode (§9.3); themselves in keys mode |
 | Alt, Ctrl, Shift | `0xa1`, `0xa5`, `0xa2`/`0xa3` | Modifier flags on later keys; Ctrl and Alt also for the chords in §9.5 |
 
-The F7–F9 codes are not yet observed on hardware (§17).
+F7–F9 arrive as `0x87`–`0x89`, as the MCU's source says (observed in M3,
+§17). Every key gives the engine the code and ASCII ScummVM's SDL backend
+would: letters as their lower-case key code with the ASCII as typed,
+Ctrl+letter as the control character, F1–F10 with `ASCII_F1`… (315…), the
+arrows and editing keys with their key code as ASCII. Everything about a
+held key is fixed at its press: repeats resend that down, and the release
+sends the matching up however the MCU translates it. The power button
+(`0x91`, a press with no release) is accepted and not passed on.
 
 The table is data in `picocalc/`, and a host test checks that every code
 the MCU can send maps to exactly one entry and that no binding needs a
@@ -571,8 +590,10 @@ further key-downs, which is what a text field wants.
 
 Upstream detects Ctrl+Alt+Del from HID codes. The patched poll sets the
 same `g_fq_quit_pending` flag from PicoCalc codes, so upstream's quit path
-runs unchanged. Whether the MCU delivers Del with Ctrl and Alt both held is
-checked on the device in M3; if not, Alt+Q replaces it.
+runs unchanged: the key map sends Ctrl and Alt as `LCTRL` and `LALT` and
+Del as `DELETE`, the codes upstream's detector already knows. The MCU
+delivers Del with Ctrl and Alt both held: the owner quit games with it on
+the keyboard in M3, so D9 stands and Alt+Q is not needed.
 
 ---
 
@@ -600,6 +621,9 @@ keyboard are on core 1.
 
 Card detect (GP22, active low, pull-up) is read once at boot to show "no
 card" instead of an empty selector. Removal while running is not handled.
+`main.c` mounts the card itself, before upstream's `cabal_init()`, so the
+mount is timed and a failure has its page; upstream's own call then finds
+it mounted.
 
 ### 10.2 Card layout
 
@@ -699,7 +723,9 @@ What the port adds, **estimated**:
 | Two RGB565 line buffers | 1,280 |
 | Two palettes in RGB565 (pending, presented) | 1,024 |
 | PWM ring, 2 × 512 frames × 2 slots × 4 B | 8,192 |
-| Key event queue, 64 entries | 256 |
+| Key event ring, 64 entries with their times (M3: 384) | 256 |
+| Key map's held set, 256 keys × 6 B (M3) | 1,536 |
+| Two text-row buffers for the pages (M3) | 1,280 |
 | Log ring | 4,096 |
 | Pool records, counters, status band | < 1,024 |
 | **Total added** | **~16 KB** |
@@ -709,7 +735,8 @@ Core 1's stack is **2 KB**, not the 4 KB of SCRATCH_X: the SDK's
 `multicore_launch_core1()` takes `PICO_CORE1_STACK_SIZE` (0x800) below
 `__StackOneTop` (found in M2, HW §9.5). Painted before launch, the
 presenter, the southbridge, the log pump and the heartbeat took it to 660
-bytes in M2; the heartbeat reports it.
+bytes in M2, and with the keyboard and the pages to 724 in M3; the
+heartbeat reports it.
 
 SRAM placement of hot engine code (M8) spends whatever is left, in measured
 tiers.
@@ -745,8 +772,15 @@ from `git describe`); southbridge; LCD cleared before `DISPON`; launch
 core 1; PSRAM verify; card check; audio; then upstream's `cabal_init()`
 and `cabal_main()`: welcome, selector, game.
 
-A failure before the selector (no PSRAM, no card, no `/quest`) shows a page
-naming it, never a blank screen (EL §8.1).
+A failure before the selector (no PSRAM, no card, a card that does not
+mount, no `/quest`) shows a page naming it, never a blank screen (EL §8.1).
+Core 1 draws the pages (`page.c`) in the 8x10 font from
+`picocalc-text-starter`, straight to the LCD, since the PSRAM's page
+cannot go through the frame pool. For the card's three, core 0 then
+watches card detect, debounced for 500 ms (HW §7.1): once a card is in
+that was not before (inserted into an empty slot, or taken out and put
+back), the program restarts itself, parking core 1 first (§6.2). An empty
+`/quest` is upstream's selector's to say.
 
 ### 13.2 The date and time
 
@@ -846,8 +880,13 @@ PicoCalc, so development follows EL §13.1 and HW §2.7:
 - **Keep the Mac's display awake** (`caffeinate -d`) while the probe is in
   use; a sleeping display wedges it (HW §2.7).
 - **Type over the UART**: the development build turns received bytes into
-  PicoCalc key events, with reserved bytes for the pointer buttons and the
-  chords, so a game can be driven by a script with nobody at the keyboard.
+  PicoCalc key events, so a game can be driven by a script with nobody at
+  the keyboard: printable bytes are their keys, and `0x01 state code` is
+  any event as the MCU would send it (arrows, function keys, modifiers held
+  across keys). `0x02` restarts the program the way a card change does.
+  `scripts/keys.sh` names them (`down down enter`, `ctrl+alt+del`,
+  `text:look`, `hold:up 2`, `restart`). The pointer buttons come with the
+  pointer (M6).
 
 ### 14.2 Two builds
 
@@ -865,8 +904,9 @@ PicoCalc, so development follows EL §13.1 and HW §2.7:
 
 Once a second on the development build: core 0 busy share (wall time not
 in `cabal_delay`/`delayMillis`), presents, full presents, dropped frames,
-longest present, mixer worst half and share, late refills, key events,
-I²C errors, log lines dropped, PSRAM heap free, die temperature, battery
+longest present, mixer worst half and share, late refills, key events
+(and their mean and longest wait from the FIFO to the engine), keys
+unknown to the map and stray releases, I²C errors, log lines dropped, PSRAM heap free, die temperature, battery
 and charging.
 
 ---
@@ -998,6 +1038,10 @@ with each modifier, is logged with its code and none is lost.
 **Measured**: card mount time, directory scan time for the test card,
 key-to-event latency.
 
+**Done** 2026-10-29 (`milestones.md`). Found on the way: a reset in the
+middle of a southbridge transaction can kill the MCU until a power cycle
+(§6.2).
+
 ### M4: First games, and the gate
 
 - An AGI title played by keyboard (keys mode, no pointer needed, no audio).
@@ -1110,16 +1154,16 @@ Every value the port depends on that has not been checked on this hardware
 | Stable at 300 MHz, 1.20 V, under this workload | yes | HW §3 (other workloads) | medium | M4, M8 soak |
 | PSRAM at 100 MHz (divider 3) at 300 MHz | works | the M1 round trip, 32,790 words | high | Confirmed 2026-10-29 |
 | LCD SPI at 75 MHz | works | the M1 test pattern, by eye | high | Confirmed 2026-10-29 |
-| SD at 25 MHz on `spi0` with upstream's driver | works | HW §7.1 (another driver) | medium | M3 |
-| F6–F10 codes `0x86`–`0x90` | F7–F9 = `0x87`–`0x89` assumed | HW §6.2 (F6, F10 observed) | medium | M3 |
-| Ctrl+Alt+Del delivered by the MCU | yes | MCU keymap source, not observed | low | M3 |
+| SD at 25 MHz on `spi0` with upstream's driver | works | mounted and read through M3, two games launched | high | Confirmed 2026-10-29 |
+| F6–F10 codes `0x86`–`0x90` | F7–F9 = `0x87`–`0x89` | observed, M3 | high | Confirmed 2026-10-29 |
+| Ctrl+Alt+Del delivered by the MCU | yes | used on the keyboard by the owner, M3 | high | Confirmed 2026-10-29 |
 | Mixer half fits 14 ms with OPL at 300 MHz | yes | none | low | M5 |
 | PSRAM frame read cost | hidden behind the wire; 6 % of core 0 by DMA | measured, M2 (§7.3) | high | Confirmed 2026-10-29; M8 measures under engines |
 | UF2 Loader's app partition holds 3.6 MB | yes | not checked | low | M9 |
 | POWMAN timer unaffected by the move to 300 MHz | yes | read either side of the switch, M1 | high | Confirmed 2026-10-29 |
 | Shell's clock record survives into the port and reads correctly | yes | read at boot, M1, after a reset over SWD | high | Confirmed 2026-10-29; a launch from the shell checked in M7 |
 | Upstream's SRAM use leaves room for the port | yes; 342,920 bytes left | measured, M0 build | high | Confirmed 2026-10-29 |
-| Core 1 stack of 2 KB is enough | yes; 660 bytes used | painted stack, M2 | high | Confirmed 2026-10-29; watched in the heartbeat |
+| Core 1 stack of 2 KB is enough | yes; 724 bytes used | painted stack, M2, M3 | high | Confirmed 2026-10-29; watched in the heartbeat |
 
 ---
 
@@ -1133,6 +1177,7 @@ Every value the port depends on that has not been checked on this hardware
 | Keyboard pointer too clumsy for pixel-hunting games | Poor play | Acceleration plus Ctrl nudges; owner play-test in M6; settings |
 | Upstream changes files we patch | Patch rejects on a bump | Small patch, shims first, `check_sources.sh`; bump deliberately |
 | A game needs a key the MCU cannot send | Unplayable title | Key-map host test; Alt-layer bindings where needed |
+| A reset during a southbridge transaction kills the MCU until a power cycle (found in M3) | Dead keyboard, screen looks normal | Every reboot parks core 1 first (§6.2); the banner names a southbridge that does not answer |
 | Card latency during SCUMM v7 streaming | Speech stutter | Mixer in IRQ already decouples output; measure in M5 |
 
 ---

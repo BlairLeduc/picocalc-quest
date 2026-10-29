@@ -2,8 +2,9 @@
  * (design.md §6.1).
  *
  * Bring-up of the southbridge and the LCD and the corner-coded test
- * pattern (M1); then the presenter (M2, §7.3), the log pump and a
- * heartbeat once a second. The keyboard comes in M3.
+ * pattern (M1); then the presenter (M2, §7.3), the keyboard's poll (M3,
+ * §9.1), the pages shown in place of the selector (page.h), the log pump
+ * and a heartbeat once a second.
  */
 #ifndef PICOCALC_QUEST_CORE1_H
 #define PICOCALC_QUEST_CORE1_H
@@ -25,13 +26,14 @@ typedef struct {
 
 extern core1_bringup_t g_core1;
 
-/* Set by core 0 when the PSRAM fails its check (§11.3): core 1 paints
- * the picture's area red, until M3's error pages can name it. */
-extern volatile bool g_psram_failed;
-
 /* Core 0's time in upstream's cabal_delay since boot, in microseconds,
  * kept by core 0 (main.c) for the heartbeat's busy share (§14.3). */
 extern volatile uint32_t g_core0_delay_us;
+
+/* Core 0, before a reboot: core 1 stops between two transactions and
+ * stays stopped, so the reboot cannot catch the southbridge mid-way
+ * (southbridge.h). Returns once it has, or after 100 ms. */
+void core1_park(void);
 
 /* Core 0, before launching core 1: fill its stack with a pattern, so the
  * heartbeat can report how deep it has gone (§12.1). */
