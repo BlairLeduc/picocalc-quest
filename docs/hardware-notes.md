@@ -658,6 +658,23 @@ polled-DMA ping-pong of §4.6 in one window, eight runs each:
 
 That is the floor any renderer adds its own cost to.
 
+**A 320×240 indexed frame read from PSRAM presents at the wire's pace.**
+Measured on a **Pimoroni Pico Plus 2 W (RP2350B), 2026-10-29**, clk_sys
+300 MHz, SPI 75 MHz configured, PSRAM at 100 MHz: core 1 presenting
+320×240 8-bit frames out of PSRAM in one window, each row expanded
+through a 256-entry RGB565 palette in SRAM (code in SRAM, the source read
+a 32-bit word per four pixels) into one of two line buffers while the
+other is on the wire, at 26–30 frames a second for 60–88 s per run:
+
+| How the row is read from PSRAM | Present, wall time |
+|---|---:|
+| Through the cached XIP window | **18.12–18.16 ms** |
+| Through the uncached alias (`0x15000000`) | 18.12–18.20 ms |
+| DMA'd from the uncached alias into SRAM, a row ahead | 18.6–19.1 ms, longest 21.9 ms |
+
+Wire math is 16.38 ms, so 10.7 % over, the same margin as the SRAM-only
+figures above: the PSRAM read and the expansion hide behind the wire.
+
 The same holds for a 240×224 rectangle (Plus 2 W, 2026-10-08, 75 MHz, one
 run each, at boot): **12.58 ms** row by row from two line buffers and
 12.55 ms as one colour with the DMA's read address held, against 11.47 ms
@@ -1403,6 +1420,28 @@ than the SPI wire, on a 150 MHz core. We chased it:
 So: **keep per-frame working sets in SRAM.** Use PSRAM for capacity, not for the
 hot path — or at least measure before assuming the XIP cache hides it.
 
+**The cost lands on the other core.** Measured on a **Pimoroni Pico Plus 2 W
+(RP2350B), 2026-10-29**, clk_sys 300 MHz, PSRAM at 100 MHz, flash at 50 MHz:
+core 0 ran a C++ animation from flash (about 3.6 MB image) drawing 320×200
+frames into PSRAM and copying each to a 320×240 buffer in PSRAM; core 1
+read each finished buffer out of PSRAM to the LCD (§4.7). Core 0's frame
+rate, over the same 15 seconds of the animation, four builds in one
+sitting:
+
+| Core 1 reads the frame | Core 0 frames/s | Core 0's loss |
+|---|---:|---:|
+| Not at all (takes it and gives it back) | 29.9 | — |
+| By DMA from the uncached alias into SRAM | 28.0 | 6 % |
+| Through the uncached alias, by the CPU | 27.6 | 8 % |
+| Through the cached XIP window | 26.5 | **11 %** |
+
+Reading through the cache evicts the other core's code and data from the
+16 KB cache they share; reading past it still contends for the QMI but
+leaves the cache alone. Reading past the cache needs the writer's lines
+cleaned out first: `xip_cache_clean_range()` over the 76,800-byte buffer
+took **0.45–0.69 ms** of core 0's time per frame (the longest seen), part
+of the 6–8 %.
+
 ### 9.4 Small `memcpy` calls are call overhead
 
 A sampler that copies one 8-pixel tile run at a time makes 28 calls per row and
@@ -1430,6 +1469,14 @@ loss and device errors. More than an hour of clean visual/audio operation was
 subsequently reported on each of a Pico 2 W and Plus 2 W; those long observations
 had no contemporaneous UART capture. They demonstrate a viable ownership split,
 not a universal compute-headroom guarantee.
+
+**Core 1's stack is 2 KB by default, whatever the linker script reserves.**
+`multicore_launch_core1()` uses `PICO_CORE1_STACK_SIZE` (0x800 in SDK 2.3.1)
+below `__StackOneTop`, so a linker script with a 4 KB SCRATCH_X still gives
+core 1 only its top 2 KB (`0x20080800`–`0x20081000`), read from the ELF's
+symbols, 2026-10-29. Measured with the stack painted before launch: an LCD
+presenter, an I²C poll, a UART log pump and a `printf` heartbeat on core 1
+reached **660 bytes** (Plus 2 W, Arm GCC 15.2, `-O3`).
 
 Use compact source snapshots or generated bands when full-frame double
 buffering would consume too much SRAM. Keep producer writes away from any

@@ -4,6 +4,73 @@ What each milestone verified, on which board, on what date, and what was
 not checked, newest first. `design.md` §16 holds each milestone's scope
 and done-when criteria; this file keeps the full record.
 
+**M2 (display) is done**, on 2026-10-29, on the same Pimoroni Pico Plus 2 W
+in a PicoCalc, flashed over SWD, with Arm GCC 15.2.Rel1 and SDK 2.3.1,
+development build. The welcome screen checked on the panel by the owner.
+
+- **The frame pool** (`picocalc/framepool.c`, §7.2, from pico-oric's
+  snapshot pool): three of upstream's 320×240 buffers in PSRAM, free,
+  filling, ready and rendering, an older ready frame dropped at publish,
+  every transition under one SIO spinlock (`picocalc/video_shim.c`). The
+  palette is copied into the frame's record at publish. The third slot sits
+  in the 512 KB upstream reserves below the mspace and no longer uses, so
+  `psram_allocator.c` is not patched and the mspace keeps its 7,680 KB.
+- **The shims**: `cabal_get_back_buffer()` claims a buffer if core 0 holds
+  none, `cabal_swap_buffers()` publishes it; `rp2350-minimal.cpp` is
+  unchanged.
+- **The presenter** (`picocalc/core1.c`, §7.3): each ready frame at y = 40,
+  each row expanded through its palette (`frame_expand_row`, in SRAM, a word
+  per four pixels) into one of two line buffers while the other is on the
+  wire; the log pumped every 16 rows. The first frame clears the test
+  pattern from the bands.
+- **The read strategy**, by `PICOCALC_QUEST_FB_READ`: cached, uncached
+  (core 0 cleans the buffer's lines at publish), DMA from the uncached alias
+  a row ahead (the default), or none (the control).
+- **The heartbeat** adds core 0's busy share (wall time outside
+  `cabal_delay`, wrapped at link time), frames published, presented and
+  dropped, the present time and its longest, the longest publish, and core
+  1's stack high-water mark from a stack painted before launch.
+
+**Checked on the board** (UART logs `out/m2-*.log`, not committed):
+
+- **The owner checked the welcome screen on the panel**: centred, black
+  bands above and below, colours right, the animation moving.
+- The DMA build: **109 consecutive heartbeats**, 0 I²C errors, 0 log
+  writes dropped, 0 frames dropped. The welcome ran 88 s at 27–29 frames a
+  second, every frame presented; then the selector found no `/quest` and
+  upstream idled, core 0 busy 0.0–0.8 %.
+- **Present, full 320×240**: 18.12–18.16 ms through the cache or the
+  uncached alias, 18.6–19.1 ms by DMA (longest 21.9 ms); wire math 16.38 ms.
+- **The read strategies against core 0** (§7.3), the same sitting, core 0's
+  welcome frame rate over the same 15 seconds: none 29.9 a second; DMA
+  28.0 (6 % less); uncached 27.6 (8 %); cached 26.5 (11 %). Core 0's
+  publish, with the cache clean, took up to 0.45–0.69 ms; without it, 35 µs.
+- **Core 1's stack**: 2 KB (SDK default), 660 bytes used at most.
+- Core 0 is busy 100 % through the welcome in every build: the welcome
+  asks for 62.5 frames a second and gets 26–30 at 300 MHz.
+
+**Host:** `test_framepool` passes: the transitions, 200,000 random steps of
+both cores' calls (core 0 never claims what core 1 holds, at most one
+ready, each frame's palette the one published with it, every publish
+taken, dropped or pending), RGB565 against a division model, and the row
+expander at four source alignments. Two planted faults (a lost drop count,
+a wrong pixel in the expander) each failed it.
+
+**Measured** (development build, DMA): RAM used to 124,964 bytes, leaving
+**333,788 of 448 KB** (M1: 338,116); `.bss` 100,684, `.data` 21,916, text
+2,666,496 plus `.rodata` 916,960.
+
+**Found:**
+- Core 1's stack is the SDK's 2 KB, not the 4 KB SCRATCH_X holds (HW §9.5).
+- The welcome's length is its ticker's: 375 characters at 60 pixels a
+  second, about 88 s with the intro and outro, whatever the timeout passed.
+  M1's 85 s was this, not a timing fault.
+- The third framebuffer slot needed no patch (above).
+
+**Not checked:** the selector's screen with games on the card (none on the
+card used; M3); presenting with audio running (M5); the release build on
+the board; the read strategies under a real engine (M8 measures again).
+
 **M1 (board bring-up) is done**, on 2026-10-29, on a Pimoroni Pico Plus 2 W
 (RP2350B rev 2, 16 MB flash; the image does not probe the radio, the
 owner named the board) in a PicoCalc, flashed over SWD, with Arm GCC

@@ -4,13 +4,13 @@
  * The boot order of §13.1: clocks (§11.1); the log and stdio (§14.2);
  * the banner; core 1, which brings up the southbridge and the LCD and
  * draws the test pattern; PSRAM, checked before the heap goes on it
- * (§11.3); then upstream's cabal_init() and cabal_main(). The card,
- * audio and the frame pool come in later milestones (§16).
+ * (§11.3); the frame pool, which core 1 presents from (§7.2); then
+ * upstream's cabal_init() and cabal_main(). The card and audio come in
+ * later milestones (§16).
  */
 
 #include <stdint.h>
 #include <stdio.h>
-#include <string.h>
 
 #include "hardware/sync.h"
 #include "pico/multicore.h"
@@ -26,29 +26,21 @@
 #include "psram_allocator.h"
 #include "psram_check.h"
 #include "psram_init.h"
+#include "video.h"
 
 void cabal_init(void);
 int cabal_main(void);
 void cabal_enable_psram_heap(void);
 void cabal_report_previous_crash(void);
 
-/* Upstream's two PSRAM framebuffer slots, as its main.c uses them. Its
- * swap also handed the new front buffer to HDMI (graphics_set_buffer);
- * nothing presents yet, so that hand-off is gone until M2's pool
- * publishes the buffer to core 1 (§7.2). */
-static uint8_t *framebuffer[2];
-static int front;
-
-uint8_t *cabal_get_framebuffer(void) {
-    return framebuffer[front];
-}
-
-uint8_t *cabal_get_back_buffer(void) {
-    return framebuffer[1 - front];
-}
-
-void cabal_swap_buffers(void) {
-    front = 1 - front;
+/* Core 0's time in upstream's delay, for the heartbeat's busy share
+ * (§14.3): the link wraps cabal_delay, so upstream's OSystem calls this
+ * and the file stays unpatched. */
+void __real_cabal_delay(uint32_t ms);
+void __wrap_cabal_delay(uint32_t ms) {
+    uint32_t t0 = time_us_32();
+    __real_cabal_delay(ms);
+    g_core0_delay_us += time_us_32() - t0;
 }
 
 /* The shell's clock, read on each side of the move to 300 MHz (§13.2):
@@ -126,6 +118,7 @@ int main(void) {
     /* Core 1 brings up the southbridge and the panel; from here on, core
      * 1 drains the log. */
     log_start_ring();
+    core1_paint_stack();
     multicore_launch_core1(core1_main);
     while (!g_core1.ready) tight_loop_contents();
     __dmb();
@@ -152,10 +145,7 @@ int main(void) {
     psram_set_sram_mode(0);
     cabal_enable_psram_heap();
 
-    framebuffer[0] = psram_get_framebuffer();
-    framebuffer[1] = psram_get_framebuffer_back();
-    memset(framebuffer[0], 0, CABAL_FRAMEBUFFER_SIZE);
-    memset(framebuffer[1], 0, CABAL_FRAMEBUFFER_SIZE);
+    video_init();
 
     cabal_init();
     return cabal_main();

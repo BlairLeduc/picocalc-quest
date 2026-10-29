@@ -71,6 +71,9 @@ else()
     # PICOCALC_QUEST_UART=OFF is the build that ships: no stdio, GP2/GP3
     # free. ON, the default, is the development build (§14.2).
     option(PICOCALC_QUEST_UART "stdio on UART0, GP2/GP3 (development)" ON)
+    # 0 cached, 1 uncached, 2 DMA, 3 none (picocalc/video.h); M2 measured
+    # them and kept DMA, which cost core 0 least (§7.3).
+    set(PICOCALC_QUEST_FB_READ 2 CACHE STRING "How core 1 reads frames from the PSRAM")
     if (PICOCALC_QUEST_UART)
         set(PICOCALC_QUEST_UART_ON 1)
     else()
@@ -104,6 +107,7 @@ else()
         picocalc/board.c
         picocalc/clock.c
         picocalc/core1.c
+        picocalc/framepool.c
         picocalc/input_shim.c
         picocalc/lcd.c
         picocalc/log.c
@@ -181,6 +185,8 @@ else()
         PICO_DEFAULT_UART=0
         PICO_DEFAULT_UART_TX_PIN=2
         PICO_DEFAULT_UART_RX_PIN=3
+        # How core 1 reads frames from the PSRAM (video.h, §7.3).
+        PICOCALC_QUEST_FB_READ=${PICOCALC_QUEST_FB_READ}
     )
 
     # As upstream: dlmalloc in mspace-only mode over PSRAM, with footers
@@ -209,6 +215,9 @@ else()
     # SDK's UART driver, which blocks.
     pico_enable_stdio_uart(picocalc-quest 0)
     pico_enable_stdio_usb(picocalc-quest 0)
+
+    # Core 0's time in upstream's delay, for the heartbeat (main.c, §14.3).
+    target_link_options(picocalc-quest PRIVATE -Wl,--wrap=cabal_delay)
 
     # Upstream's linker script: the 64 KB main stack the GOB engine needs
     # (§5.4, §12.1).

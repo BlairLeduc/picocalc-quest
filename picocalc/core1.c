@@ -1,17 +1,20 @@
-/* core1.c — core 1's loop: the panel, the southbridge and the log
- * (design.md §6.1, §14.3). */
+/* core1.c — core 1's loop: the presenter, the southbridge and the log
+ * (design.md §6.1, §7.3, §14.3). */
 
 #include "core1.h"
 
 #include <stdio.h>
 
+#include "hardware/dma.h"
 #include "hardware/sync.h"
 #include "pico/stdlib.h"
 
 #include "board.h"
+#include "framepool.h"
 #include "lcd.h"
 #include "log.h"
 #include "southbridge.h"
+#include "video.h"
 
 /* The battery is refreshed by the MCU every 20 s (hardware-notes.md §6),
  * but a transaction a second also keeps its bus watchdog fed (§6.1)
@@ -26,7 +29,17 @@ volatile bool g_psram_failed;
 
 /* Where the picture goes (§7.1): upstream's 320x240 framebuffer at y 40. */
 #define FRAME_Y 40u
+#define FRAME_W 320u
 #define FRAME_H 240u
+
+/* The log is pumped this often within a present, so a frame (some 19
+ * ms) does not leave the UART idle for its length (§14.2). */
+#define PUMP_ROWS 16u
+
+#define STACK_PAINT 0xC1C1C1C1u
+extern uint32_t __StackOneBottom, __StackOneTop;
+
+volatile uint32_t g_core0_delay_us;
 
 /* The corner-coded test pattern (EL §13.3, hardware-notes.md §10):
  * orientation, colour order and all four edges, by eye.
@@ -63,6 +76,76 @@ static void test_pattern(void) {
     lcd_fill(w - sq, h - sq, sq, sq, white);
 }
 
+/* ---- the presenter (§7.3) ----------------------------------------- */
+
+typedef struct {
+    uint32_t presents;
+    uint32_t last_us;    /* the last present, wall time   */
+    uint32_t max_us;     /* the longest since boot        */
+} present_stats_t;
+
+static present_stats_t s_present;
+static uint16_t s_line[2][FRAME_W];
+
+#if PICOCALC_QUEST_FB_READ == FB_READ_DMA
+/* Rows of indices, copied out of the PSRAM a row ahead of the one being
+ * expanded. */
+static uint32_t s_idx[2][FRAME_W / 4u];
+static int s_row_dma = -1;
+
+static void row_dma_start(const uint8_t *src, unsigned slot) {
+    dma_channel_config c = dma_channel_get_default_config((unsigned)s_row_dma);
+    channel_config_set_transfer_data_size(&c, DMA_SIZE_32);
+    channel_config_set_read_increment(&c, true);
+    channel_config_set_write_increment(&c, true);
+    dma_channel_configure((unsigned)s_row_dma, &c, s_idx[slot], src, FRAME_W / 4u, true);
+}
+#endif
+
+/* Every row of the frame, through its palette, into one line buffer while
+ * the other is on the wire (hardware-notes.md §4.6). */
+static void present(int i) {
+    const uint8_t *px = video_pixels(i);
+    const uint16_t *pal = video_palette(i);
+    uint32_t t0 = time_us_32();
+
+    lcd_blit_begin(0, FRAME_Y, FRAME_W, FRAME_H);
+#if PICOCALC_QUEST_FB_READ == FB_READ_DMA
+    row_dma_start(px, 0);
+#endif
+    for (unsigned row = 0; row < FRAME_H; row++) {
+        uint16_t *line = s_line[row & 1u];
+#if PICOCALC_QUEST_FB_READ == FB_READ_DMA
+        dma_channel_wait_for_finish_blocking((unsigned)s_row_dma);
+        if (row + 1u < FRAME_H) row_dma_start(px + (row + 1u) * FRAME_W, (row + 1u) & 1u);
+        frame_expand_row((const uint8_t *)s_idx[row & 1u], pal, line, FRAME_W);
+#else
+        frame_expand_row(px + row * FRAME_W, pal, line, FRAME_W);
+#endif
+        lcd_blit_row(line, FRAME_W);
+        if (row % PUMP_ROWS == PUMP_ROWS - 1u) log_pump();
+    }
+    lcd_blit_end();
+
+    uint32_t us = time_us_32() - t0;
+    s_present.presents++;
+    s_present.last_us = us;
+    if (us > s_present.max_us) s_present.max_us = us;
+}
+
+/* ---- core 1's stack ------------------------------------------------- */
+
+void core1_paint_stack(void) {
+    for (uint32_t *p = &__StackOneBottom; p < &__StackOneTop; p++) *p = STACK_PAINT;
+}
+
+/* The deepest core 1's stack has been, from the paint left untouched. */
+static uint32_t stack_used(void) {
+    const uint32_t *p = &__StackOneBottom;
+    while (p < &__StackOneTop && *p == STACK_PAINT) p++;
+    return (uint32_t)((uintptr_t)&__StackOneTop - (uintptr_t)p);
+}
+
 void core1_main(void) {
     /* 1. The southbridge first: a dead bus is the first thing to know
      *    about (hardware-notes.md §10). */
@@ -81,15 +164,19 @@ void core1_main(void) {
     g_core1.pattern_us = time_us_32() - t0;
 
     board_temp_init();
+#if PICOCALC_QUEST_FB_READ == FB_READ_DMA
+    s_row_dma = dma_claim_unused_channel(true);
+#endif
 
     __dmb();
     g_core1.ready = true;
 
-    bool painted_fault = false;
+    bool painted_fault = false, bands_cleared = false;
     int battery = -1, temp_c = board_temp_c();
     uint32_t now = time_us_32();
     uint32_t next_bat = now, next_beat = now + HEARTBEAT_US;
     uint32_t seconds = 0, loops = 0;
+    uint32_t last_pub = 0, last_drop = 0, last_presents = 0, last_delay = g_core0_delay_us;
     for (;;) {
         log_pump();
         loops++;
@@ -97,6 +184,19 @@ void core1_main(void) {
         if (g_psram_failed && !painted_fault) {
             lcd_fill(0, FRAME_Y, LCD_PANEL_W, FRAME_H, RGB565(255, 0, 0));
             painted_fault = true;
+        }
+
+        int frame = video_take();
+        if (frame >= 0) {
+            if (!bands_cleared) {
+                /* The test pattern's corners and border go with the
+                 * first frame: the bands are black (§7.4). */
+                lcd_fill(0, 0, LCD_PANEL_W, FRAME_Y, 0);
+                lcd_fill(0, FRAME_Y + FRAME_H, LCD_PANEL_W, LCD_PANEL_H - FRAME_Y - FRAME_H, 0);
+                bands_cleared = true;
+            }
+            if (PICOCALC_QUEST_FB_READ != FB_READ_NONE) present(frame);
+            video_release(frame);
         }
 
         now = time_us_32();
@@ -112,16 +212,33 @@ void core1_main(void) {
         if ((int32_t)(now - next_beat) >= 0) {
             next_beat += HEARTBEAT_US;
             seconds++;
-            printf("hb %lu: temp %d C, battery %d%%%s, i2c errors %lu, log dropped %lu, "
+            uint32_t pub, drop, delay = g_core0_delay_us;
+            video_counts(&pub, &drop);
+            /* Core 0's busy share: the second's wall time not in
+             * cabal_delay (§14.3), in thousandths. */
+            uint32_t idle = delay - last_delay;
+            uint32_t busy = idle >= HEARTBEAT_US ? 0 : 1000u - idle / (HEARTBEAT_US / 1000u);
+            printf("hb %lu: core 0 busy %lu.%lu%%, frames %lu, presented %lu, dropped %lu, "
+                   "present %lu us (max %lu), publish max %lu us, core 1 stack %lu B; "
+                   "temp %d C, battery %d%%%s, i2c errors %lu, log dropped %lu, "
                    "core 1 loops %lu\n",
-                   (unsigned long)seconds, temp_c, battery < 0 ? -1 : battery & 0x7f,
+                   (unsigned long)seconds, (unsigned long)(busy / 10u),
+                   (unsigned long)(busy % 10u), (unsigned long)(pub - last_pub),
+                   (unsigned long)(s_present.presents - last_presents),
+                   (unsigned long)(drop - last_drop), (unsigned long)s_present.last_us,
+                   (unsigned long)s_present.max_us, (unsigned long)g_video_publish_max_us,
+                   (unsigned long)stack_used(), temp_c, battery < 0 ? -1 : battery & 0x7f,
                    battery >= 0 && (battery & 0x80) ? " charging" : "",
                    (unsigned long)sb_error_count(), (unsigned long)log_dropped(),
                    (unsigned long)loops);
+            last_pub = pub;
+            last_drop = drop;
+            last_presents = s_present.presents;
+            last_delay = delay;
             loops = 0;
         }
 
         /* Never sleep_us here (hardware-notes.md §9.7). */
-        busy_wait_us_32(20);
+        if (frame < 0) busy_wait_us_32(20);
     }
 }
