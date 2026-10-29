@@ -4,15 +4,17 @@
  * The boot order of §13.1: clocks (§11.1); the log and stdio (§14.2);
  * the banner; core 1, which brings up the southbridge and the LCD and
  * draws the test pattern; PSRAM, checked before the heap goes on it
- * (§11.3); the frame pool, which core 1 presents from (§7.2); then
- * upstream's cabal_init() and cabal_main(). The card and audio come in
- * later milestones (§16).
+ * (§11.3); the frame pool, which core 1 presents from (§7.2); the card,
+ * mounted and checked for /quest (§10); then upstream's cabal_init() and
+ * cabal_main(). A failure on the way shows a page naming it (page.h).
+ * Audio comes in M5 (§16).
  */
 
 #include <stdint.h>
 #include <stdio.h>
 
 #include "hardware/sync.h"
+#include "hardware/watchdog.h"
 #include "pico/multicore.h"
 #include "pico/stdlib.h"
 
@@ -20,7 +22,9 @@
 #include "board_config.h"
 #include "clock.h"
 #include "core1.h"
+#include "frank_quest_fs.h"
 #include "log.h"
+#include "page.h"
 #include "picocalc_quest_version.h"
 #include "picocalc_shell.h"
 #include "psram_allocator.h"
@@ -41,6 +45,77 @@ void __wrap_cabal_delay(uint32_t ms) {
     uint32_t t0 = time_us_32();
     __real_cabal_delay(ms);
     g_core0_delay_us += time_us_32() - t0;
+}
+
+/* Upstream's scan of /quest, timed for M3 (§16). The link wraps it by its C++ name, so the selector stays
+ * unpatched; QuestGame is opaque here. */
+int __real__Z22frank_quest_scan_gamesP9QuestGamei(void *out, int max_out);
+int __wrap__Z22frank_quest_scan_gamesP9QuestGamei(void *out, int max_out) {
+    uint32_t t0 = time_us_32();
+    int n = __real__Z22frank_quest_scan_gamesP9QuestGamei(out, max_out);
+    printf("picocalc-quest: /quest scanned in %lu ms, %d game(s)\n",
+           (unsigned long)((time_us_32() - t0) / 1000u), n);
+    return n;
+}
+
+/* The card's state must hold this long to count: the slot is
+ * push-to-eject, and its switch bounces through an insertion
+ * (hardware-notes.md §7.1). */
+#define CARD_SETTLE_US 500000u
+
+void picocalc_restart(void);
+
+/* Wait until the card has been `in` (or out) for CARD_SETTLE_US. */
+static void wait_for_card(bool in) {
+    uint32_t since = time_us_32();
+    for (;;) {
+        if (picocalc_shell_card_present() != in) since = time_us_32();
+        else if (time_us_32() - since >= CARD_SETTLE_US) return;
+        busy_wait_us_32(10000);
+    }
+}
+
+/* Show the page, and start again once a card is in that was not before:
+ * after an insertion for an empty slot, after the card comes out and
+ * goes back in otherwise. The restart is the program's own, which both
+ * loaders start again (picocalc_shell.h). */
+static void card_failed(page_t p) {
+    page_show(p);
+    if (p != PAGE_NO_CARD) wait_for_card(false);
+    wait_for_card(true);
+    printf("picocalc-quest: a card went in; starting again\n");
+    picocalc_restart();
+}
+
+void picocalc_restart(void) {
+    busy_wait_us_32(100000);          /* the log's last line out */
+    /* Never reset with a southbridge transaction in flight: it can leave
+     * the MCU dead until a power cycle (southbridge.h). */
+    core1_park();
+    watchdog_reboot(0, 0, 0);
+    for (;;) tight_loop_contents();
+}
+
+/* The card, before upstream's cabal_init() mounts it (§10.1, §13.1):
+ * mounted here, so the time is measured and a failure has its page;
+ * upstream's own call then finds it mounted. */
+static void check_card(void) {
+    if (!picocalc_shell_card_present()) {
+        printf("  card         : the slot is empty\n");
+        card_failed(PAGE_NO_CARD);
+    }
+    uint32_t t0 = time_us_32();
+    CabalFsResult r = cabal_fs_init();
+    uint32_t ms = (time_us_32() - t0) / 1000u;
+    if (r != CABAL_FS_OK) {
+        printf("  card         : did not mount (%d), after %lu ms\n", (int)r, (unsigned long)ms);
+        card_failed(PAGE_CARD_FAILED);
+    }
+    printf("  card         : mounted in %lu ms\n", (unsigned long)ms);
+    if (!cabal_path_exists("/quest")) {
+        printf("  card         : no /quest\n");
+        card_failed(PAGE_NO_QUEST);
+    }
 }
 
 /* The shell's clock, read on each side of the move to 300 MHz (§13.2):
@@ -122,8 +197,9 @@ int main(void) {
     multicore_launch_core1(core1_main);
     while (!g_core1.ready) tight_loop_contents();
     __dmb();
-    printf("  southbridge  : i2c %lu Hz, version %d, a register read %lu us\n",
-           (unsigned long)g_core1.i2c_hz, g_core1.sb_version, (unsigned long)g_core1.i2c_us);
+    printf("  southbridge  : i2c %lu Hz, version %d, a register read %lu us%s\n",
+           (unsigned long)g_core1.i2c_hz, g_core1.sb_version, (unsigned long)g_core1.i2c_us,
+           g_core1.sb_version < 0 ? "; NOT ANSWERING: switch the PicoCalc off and on" : "");
     printf("  lcd          : spi %lu Hz, init %lu us, test pattern %lu us\n",
            (unsigned long)g_core1.spi_hz, (unsigned long)g_core1.lcd_us,
            (unsigned long)g_core1.pattern_us);
@@ -138,7 +214,7 @@ int main(void) {
         /* Upstream's whole heap is in the PSRAM: booting into a bad one
          * would fail somewhere far from the cause. Core 1 shows it and
          * keeps the heartbeat going. */
-        g_psram_failed = true;
+        page_show(PAGE_NO_PSRAM);
         for (;;) tight_loop_contents();
     }
 
@@ -146,6 +222,7 @@ int main(void) {
     cabal_enable_psram_heap();
 
     video_init();
+    check_card();
 
     cabal_init();
     return cabal_main();

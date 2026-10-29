@@ -1,5 +1,5 @@
-/* core1.c — core 1's loop: the presenter, the southbridge and the log
- * (design.md §6.1, §7.3, §14.3). */
+/* core1.c — core 1's loop: the presenter, the keyboard, the southbridge
+ * and the log (design.md §6.1, §7.3, §9.1, §14.3). */
 
 #include "core1.h"
 
@@ -11,19 +11,21 @@
 
 #include "board.h"
 #include "framepool.h"
+#include "kbd.h"
 #include "lcd.h"
 #include "log.h"
+#include "page.h"
+#include "picocalc_input.h"
 #include "southbridge.h"
 #include "video.h"
 
-/* The battery is refreshed by the MCU every 20 s (hardware-notes.md §6),
- * but a transaction a second also keeps its bus watchdog fed (§6.1)
- * until M3 polls the keyboard. */
+/* The battery is refreshed by the MCU every 20 s (hardware-notes.md §6);
+ * once a second is plenty. The keyboard's poll, every KBD_POLL_US, is
+ * what keeps the MCU's bus watchdog fed (§6.1). */
 #define BAT_POLL_US   1000000u
 #define HEARTBEAT_US  1000000u
 
 core1_bringup_t g_core1 = { .sb_version = -1 };
-volatile bool g_psram_failed;
 
 #define RGB565(r, g, b) ((uint16_t)((((r) >> 3) << 11) | (((g) >> 2) << 5) | ((b) >> 3)))
 
@@ -40,6 +42,14 @@ volatile bool g_psram_failed;
 extern uint32_t __StackOneBottom, __StackOneTop;
 
 volatile uint32_t g_core0_delay_us;
+
+static volatile bool s_park, s_parked;
+
+void core1_park(void) {
+    s_park = true;
+    uint32_t t0 = time_us_32();
+    while (!s_parked && time_us_32() - t0 < 100000u) tight_loop_contents();
+}
 
 /* The corner-coded test pattern (EL §13.3, hardware-notes.md §10):
  * orientation, colour order and all four edges, by eye.
@@ -171,22 +181,37 @@ void core1_main(void) {
     __dmb();
     g_core1.ready = true;
 
-    bool painted_fault = false, bands_cleared = false;
+    bool bands_cleared = false;
+    page_t page = PAGE_NONE;
     int battery = -1, temp_c = board_temp_c();
     uint32_t now = time_us_32();
-    uint32_t next_bat = now, next_beat = now + HEARTBEAT_US;
+    uint32_t next_bat = now, next_kbd = now, next_beat = now + HEARTBEAT_US;
     uint32_t seconds = 0, loops = 0;
     uint32_t last_pub = 0, last_drop = 0, last_presents = 0, last_delay = g_core0_delay_us;
+    uint32_t last_taken = 0, last_wait = 0;
     for (;;) {
         log_pump();
         loops++;
+        if (s_park) {
+            /* Between transactions: nothing of the southbridge's is in
+             * flight here. */
+            s_parked = true;
+            for (;;) tight_loop_contents();
+        }
 
-        if (g_psram_failed && !painted_fault) {
-            lcd_fill(0, FRAME_Y, LCD_PANEL_W, FRAME_H, RGB565(255, 0, 0));
-            painted_fault = true;
+        /* A page in place of the selector (§13.1) covers the panel and
+         * stays; nothing is presented over it. */
+        page_t wanted = page_wanted();
+        if (wanted != page) {
+            page = wanted;
+            page_draw(page);
         }
 
         int frame = video_take();
+        if (frame >= 0 && page != PAGE_NONE) {
+            video_release(frame);
+            frame = -1;
+        }
         if (frame >= 0) {
             if (!bands_cleared) {
                 /* The test pattern's corners and border go with the
@@ -197,6 +222,15 @@ void core1_main(void) {
             }
             if (PICOCALC_QUEST_FB_READ != FB_READ_NONE) present(frame);
             video_release(frame);
+        }
+
+        /* The keyboard (§9.1): the MCU's FIFO every KBD_POLL_US, and in
+         * the development build the UART's keys every loop (§14.1). */
+        kbd_uart();
+        now = time_us_32();
+        if ((int32_t)(now - next_kbd) >= 0) {
+            next_kbd = now + KBD_POLL_US;
+            kbd_poll();
         }
 
         now = time_us_32();
@@ -213,6 +247,7 @@ void core1_main(void) {
             next_beat += HEARTBEAT_US;
             seconds++;
             uint32_t pub, drop, delay = g_core0_delay_us;
+            uint32_t taken = g_input_taken, wait = g_input_wait_sum_us;
             video_counts(&pub, &drop);
             /* Core 0's busy share: the second's wall time not in
              * cabal_delay (§14.3), in thousandths. */
@@ -220,14 +255,19 @@ void core1_main(void) {
             uint32_t busy = idle >= HEARTBEAT_US ? 0 : 1000u - idle / (HEARTBEAT_US / 1000u);
             printf("hb %lu: core 0 busy %lu.%lu%%, frames %lu, presented %lu, dropped %lu, "
                    "present %lu us (max %lu), publish max %lu us, core 1 stack %lu B; "
-                   "temp %d C, battery %d%%%s, i2c errors %lu, log dropped %lu, "
+                   "keys %lu (wait mean %lu max %lu us), ring full %lu, unknown %lu, "
+                   "stray %lu; temp %d C, battery %d%%%s, i2c errors %lu, log dropped %lu, "
                    "core 1 loops %lu\n",
                    (unsigned long)seconds, (unsigned long)(busy / 10u),
                    (unsigned long)(busy % 10u), (unsigned long)(pub - last_pub),
                    (unsigned long)(s_present.presents - last_presents),
                    (unsigned long)(drop - last_drop), (unsigned long)s_present.last_us,
                    (unsigned long)s_present.max_us, (unsigned long)g_video_publish_max_us,
-                   (unsigned long)stack_used(), temp_c, battery < 0 ? -1 : battery & 0x7f,
+                   (unsigned long)stack_used(), (unsigned long)(taken - last_taken),
+                   (unsigned long)(taken == last_taken ? 0 : (wait - last_wait) / (taken - last_taken)),
+                   (unsigned long)g_input_wait_max_us, (unsigned long)kbd_overflows(),
+                   (unsigned long)g_input_unknown, (unsigned long)g_input_stray, temp_c,
+                   battery < 0 ? -1 : battery & 0x7f,
                    battery >= 0 && (battery & 0x80) ? " charging" : "",
                    (unsigned long)sb_error_count(), (unsigned long)log_dropped(),
                    (unsigned long)loops);
@@ -235,6 +275,8 @@ void core1_main(void) {
             last_drop = drop;
             last_presents = s_present.presents;
             last_delay = delay;
+            last_taken = taken;
+            last_wait = wait;
             loops = 0;
         }
 

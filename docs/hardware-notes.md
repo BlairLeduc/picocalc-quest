@@ -1064,6 +1064,23 @@ but it cannot get around the swallowed Shift+arrow chords.
 - **The MCU resets its own I²C bus** if it sees no transaction for 2.5 s (after
   the first 10 s of uptime). A game that stops polling for seconds will come
   back to a slave that has just re-initialised.
+- **Never reset the processor in the middle of a transaction.** It can
+  leave the MCU answering nothing until the PicoCalc is switched off and
+  on. Seen on a Plus 2 W, 2026-10-29: a program polling the FIFO every
+  25 ms (in a transaction about a fifth of the time) rebooted itself
+  with `watchdog_reboot`, and from the next boot every transaction failed
+  with the address not acknowledged (1.1 ms each), 1,933 failures in 67 s,
+  for as long as it ran. SDA and SCL both read high over SWD, so nothing
+  was holding the bus; nine clocks on SCL and a STOP from the host did not
+  bring the MCU back, and neither did its own 2.5 s bus reset above. A
+  power cycle did; the same had been seen before by the board's owner.
+  Twenty reboots made after stopping the polling core between
+  transactions all came back answering. So stop I²C traffic before any
+  reboot the program makes, including a return to a loader. An SWD reset
+  is the same hazard; earlier programs that polled once a second never
+  met it there. Check the version register at boot and say so on a
+  failure: the screen and the rest of the program look normal with a dead
+  keyboard.
 
 ### 6.2 The event model, and what to build from it
 
@@ -1122,6 +1139,21 @@ reading is a rolled press: Space went down a moment before Alt came up, the
 MCU took it as Alt+Space, which it consumes (§6.3), and the release came
 after Alt's. A press lost some other way would look the same. It was seen
 once and is not explained. Ignore a release for a key that is not down.
+
+**Observed on a Plus 2 W, 2026-10-29**, every key pressed alone and with
+Shift, Ctrl and Alt (808 events): every code in the MCU's published
+keymap arrived except Caps Lock, which was not pressed, and no code
+outside it. **F6–F10 arrive as `0x86`, `0x87`, `0x88`, `0x89`, `0x90`**
+(Shift+F1…F5), so F7–F9 match the source. **Ctrl+Alt+Del is delivered**:
+Ctrl `0xa5`, Alt `0xa1`, then Del `0xd4`, Del unchanged by either.
+**Letters under Alt arrive as capitals** (Alt+F as `0x46`): the source
+skips its lower-casing when Alt is held, so with Alt only Shift says
+whether a capital was meant. Ctrl leaves letters lower case. The Space
+release with no press was seen again, after Alt. Events in the FIFO
+survive a reset of the processor: keys pressed while a program was being
+flashed arrived at the next program's first poll. The power button sends
+`0x91` pressed, with no release, from the MCU's PMU interrupt (source;
+not observed).
 
 ### 6.3 The keymap decides which chords exist
 
@@ -1235,6 +1267,15 @@ Three more things from the same driver on the same board:
 - **macOS writes a `._name` file beside every file it copies** to a FAT card
   (AppleDouble metadata). A file list on the device should skip names
   starting `._`; they are not the user's files.
+
+**Measured** on a Plus 2 W, 2026-10-29, FatFs with exFAT enabled over
+`spi0` at 25 MHz requested (Elehobica's driver, hardware SPI), a 32 GB
+card with 30.7 GB free: initialising the card and mounting it, including
+FatFs's free-space count, took **246 ms** for a card just put in and
+**63 ms** for one that stayed powered through a reset of the processor.
+Scanning a directory of three folders, with up to one file check in each,
+took 6 ms. Card detect, debounced for 500 ms, was a reliable trigger for
+"a card went in" with the slot empty at power-on.
 
 **Prefer the card to internal flash for anything the application writes**,
 such as settings. A text file on the card is one source of truth the user can

@@ -25,6 +25,106 @@
  /* get the current time */
  DWORD get_fattime (void)
  {
+--- a/src/backends/platform/rp2350/rp2350-minimal.cpp
++++ b/src/backends/platform/rp2350/rp2350-minimal.cpp
+@@ -23,6 +23,8 @@
+ // PS/2 input keeps working even when USB HID is enabled in parallel.
+ #include "ps2.h"
+ #include "ps2kbd_wrapper.h"
++// picocalc-quest: keys from the PicoCalc's keyboard (design.md §9.1).
++#include "picocalc_input.h"
+ 
+ #ifdef USB_HID_ENABLED
+ #include "usbkbd_wrapper.h"
+@@ -235,19 +237,9 @@
+     // state machines (pio0 for kbd, pio1 for mouse) and don't share
+     // hardware with the native USB port. USB HID, when enabled,
+     // layers on top so users can plug either kind of peripheral.
+-    printf("  Initializing PS/2 keyboard (pio0)...\n");
++    // picocalc-quest: the PicoCalc's keyboard, which core 1 polls; no
++    // PS/2 and no mouse (design.md §5.3, §9.1).
+     ps2kbd_init();
+-
+-    printf("  Initializing PS/2 mouse (pio1)...\n");
+-    if (ps2_mouse_pio_init(pio1, PS2_MOUSE_CLK)) {
+-        if (ps2_mouse_init_device()) {
+-            printf("  PS/2 mouse initialized (interrupt-driven streaming)\n");
+-        } else {
+-            printf("  PS/2 mouse device init failed\n");
+-        }
+-    } else {
+-        printf("  PS/2 mouse PIO init failed\n");
+-    }
+ 
+ #ifdef USB_HID_ENABLED
+     printf("  Initializing USB HID keyboard...\n");
+@@ -680,57 +672,19 @@
+     static uint32_t motion_events_this_second = 0;
+     static uint32_t last_fps_report = 0;
+     uint32_t start = time_us_32();
+-
+-    // Poll keyboard
+-    ps2kbd_tick();
+ 
+-    // Check for keyboard events. Use the extended API so we get the
+-    // raw HID code alongside the ASCII byte — we need the HID code for
+-    // Ctrl+Alt+Del detection (modifier keys and Del don't land in the
+-    // ASCII space reliably).
+-    int pressed;
+-    unsigned char ascii_byte;
+-    uint8_t hid_code;
+-    if (ps2kbd_get_key_ext(&pressed, &ascii_byte, &hid_code)) {
+-        // Ctrl+Alt+Del → reboot to selector. Never returns on match.
+-        fq_check_ctrl_alt_del(hid_code, pressed);
+-
+-        // ps2kbd_wrapper.cpp maps special keys to custom ASCII bytes
+-        // (arrows→0x80..0x83, F-keys→0xF1..0xFC, Delete→0). Those
+-        // values don't round-trip through OSystem_RP2350::convertKeyCode,
+-        // so translate the raw HID code to the CABAL_KEY_* space the
+-        // USB HID path already uses. Leaves regular ASCII keys alone.
+-        // `keycode` is widened to int so values >255 (arrows etc.) fit.
+-        int keycode = (int)ascii_byte;
+-        switch (hid_code) {
+-        case 0x52: keycode = CABAL_KEY_UP;     break;
+-        case 0x51: keycode = CABAL_KEY_DOWN;   break;
+-        case 0x4F: keycode = CABAL_KEY_RIGHT;  break;
+-        case 0x50: keycode = CABAL_KEY_LEFT;   break;
+-        case 0x49: keycode = 277;              break;  // CABAL_KEY_INSERT
+-        case 0x4A: keycode = 278;              break;  // CABAL_KEY_HOME
+-        case 0x4D: keycode = 279;              break;  // CABAL_KEY_END
+-        case 0x4B: keycode = 280;              break;  // CABAL_KEY_PAGEUP
+-        case 0x4E: keycode = 281;              break;  // CABAL_KEY_PAGEDOWN
+-        case 0x4C: keycode = CABAL_KEY_DELETE; break;
+-        default:                               break;
+-        }
++    // picocalc-quest: the PicoCalc's keys, already in ScummVM's codes
++    // with their ASCII and modifiers (picocalc/keymap.c; design.md §9.2).
++    // Ctrl and Alt arrive as LCTRL and LALT, Del as DELETE, so the
++    // Ctrl+Alt+Del detector above works on them unchanged (§9.5).
++    int pressed, keycode, ascii, flags;
++    if (picocalc_input_key(&pressed, &keycode, &ascii, &flags)) {
++        fq_check_ctrl_alt_del(keycode, pressed);
+ 
+         event->type = pressed ? CABAL_EVENT_KEYDOWN : CABAL_EVENT_KEYUP;
+         event->kbd.keycode = keycode;
+-
+-        // Get ASCII value - control keys have their own ascii codes
+-        if (keycode >= 32 && keycode < 127) {
+-            event->kbd.ascii = keycode;
+-        } else if (keycode == 8 || keycode == 9 || keycode == 13 || keycode == 27) {
+-            event->kbd.ascii = keycode;  // BS, TAB, Enter, ESC
+-        } else {
+-            event->kbd.ascii = 0;
+-        }
+-
+-        // Modifier flags are tracked separately by keyboard driver
+-        event->kbd.flags = 0;
+-
++        event->kbd.ascii = ascii;
++        event->kbd.flags = flags;
+         return true;
+     }
+ 
 --- a/src/board_config.h
 +++ b/src/board_config.h
 @@ -15,39 +15,25 @@

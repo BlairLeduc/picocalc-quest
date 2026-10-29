@@ -107,11 +107,15 @@ else()
         picocalc/board.c
         picocalc/clock.c
         picocalc/core1.c
+        picocalc/font8x10.c
         picocalc/framepool.c
         picocalc/input_shim.c
+        picocalc/kbd.c
+        picocalc/keymap.c
         picocalc/lcd.c
         picocalc/log.c
         picocalc/main.c
+        picocalc/page.c
         picocalc/psram_check.c
         picocalc/southbridge.c
         picocalc/syscalls.c
@@ -216,8 +220,12 @@ else()
     pico_enable_stdio_uart(picocalc-quest 0)
     pico_enable_stdio_usb(picocalc-quest 0)
 
-    # Core 0's time in upstream's delay, for the heartbeat (main.c, §14.3).
-    target_link_options(picocalc-quest PRIVATE -Wl,--wrap=cabal_delay)
+    # Core 0's time in upstream's delay, for the heartbeat (main.c, §14.3),
+    # and upstream's scan of /quest, timed (main.c, §16 M3), by its C++
+    # name: frank_quest_scan_games(QuestGame *, int).
+    target_link_options(picocalc-quest PRIVATE
+        -Wl,--wrap=cabal_delay
+        -Wl,--wrap=_Z22frank_quest_scan_gamesP9QuestGamei)
 
     # Upstream's linker script: the 64 KB main stack the GOB engine needs
     # (§5.4, §12.1).

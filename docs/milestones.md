@@ -4,6 +4,108 @@ What each milestone verified, on which board, on what date, and what was
 not checked, newest first. `design.md` §16 holds each milestone's scope
 and done-when criteria; this file keeps the full record.
 
+**M3 (card and keyboard) is done**, on 2026-10-29, on the same Pimoroni
+Pico Plus 2 W in a PicoCalc, flashed over SWD, with Arm GCC 15.2.Rel1 and
+SDK 2.3.1, development build. The selector, the games launching, every key
+and Ctrl+Alt+Del checked on the keyboard by the owner; the no-card page
+checked by the owner.
+
+- **The keyboard** (§9.1): core 1 drains the MCU's FIFO every 25 ms into a
+  64-entry ring of the MCU's own pairs, each with the time it was read
+  (`picocalc/kbd.c`); core 0 owns the key map (`picocalc/keymap.c`), the
+  held set and the translation, which the design had put on core 1 (§9.1
+  says why it moved). Everything about a held key is fixed at its press,
+  so a retranslated release (press `A`, release `a`; press Home, release
+  Tab; Insert under Alt, released as `i`) gives the up that matches the
+  down. ASCII as ScummVM's SDL backend gives it (§9.2).
+- **The patch** to `rp2350-minimal.cpp` (§5.3): `cabal_poll_event()` takes
+  keys from `picocalc_input_key()` and passes them to upstream's own
+  Ctrl+Alt+Del detector unchanged; `cabal_system_init()` no longer starts
+  the PS/2 mouse. The mouse block stays, fed nothing, for M6.
+- **The card** (§10.1, §13.1): card detect, then the mount, timed, then
+  `/quest`, all in `main.c` before upstream's `cabal_init()`. A failure
+  shows a page core 1 draws in the 8x10 font (`picocalc/page.c`): no
+  card, a card that did not mount, no `/quest`; and the PSRAM's, in place
+  of M1's red fill. On the card's pages the program restarts itself once
+  a card goes in.
+- **The restart parks core 1** between southbridge transactions first
+  (`picocalc_restart()`, `core1_park()`): see Found.
+- **UART keys** (§14.1): printable bytes, `0x01 state code` for any MCU
+  event, `0x02` to restart; `scripts/keys.sh` names them.
+- The heartbeat adds keys taken, their mean and longest wait from the
+  FIFO to the engine, ring-full, unknown and stray counts. Upstream's scan
+  of `/quest` is timed by a link wrap of its C++ name.
+
+**Checked on the board** (UART logs `out/m3-*.log`, not committed):
+
+- **By the owner, on the keyboard**: moved through the selector with the
+  arrows, launched Fate of Atlantis and Space Quest III, used SQ3's menus,
+  and quit with **Ctrl+Alt+Del three times**, each back to the selector
+  (D9 settled). Then every key alone and with Shift, Ctrl and Alt: **808
+  events, every code the MCU's keymap can send seen except Caps Lock**
+  (`0xc1`, not pressed), **none unknown to the map**. F6–F10 arrived as
+  `0x86`–`0x89` and `0x90`; Alt+F as `0x46`, a capital. Two releases were
+  dropped as stray, both explained: Del's, after the tear-down's flush;
+  and one Space, released with no press after Alt (HW §6.2). The only keys
+  left down in the log were held through a tear-down, which flushes.
+- **By UART keys**: Space dismissed the welcome; Down, Up and Enter
+  launched Fate of Atlantis; Ctrl+Alt+Del quit it, the heap back at
+  7,680 kB.
+- **The no-card page**, by the owner: powered on with the slot empty, the
+  page; the card put in, the program restarted and mounted it.
+- **Twenty restarts** through `picocalc_restart()`, asked for over the
+  UART: the southbridge answered after every one (version 0), 0 I²C
+  errors over 129 heartbeats.
+- 109 consecutive heartbeats in the first run and 971 in the
+  owner's session: **0 I²C errors, 0 log writes dropped, 0 ring full**.
+
+**Measured** (development build):
+
+- **Card mount** (upstream's `cabal_fs_init`, which includes FatFs's free
+  space on a card with 30,739,936 KB free): **246 ms** for a card just
+  put in, **63 ms** for one powered through an SWD reset.
+- **Scan of `/quest`** (three folders, two games): **6 ms**, every time.
+- **Key wait**, from core 1's read of the FIFO to the engine's poll, over
+  the owner's 808 events: median **9.2 ms**, 90th percentile **15.4 ms**;
+  four over 100 ms, the longest 1.4 s, while a game was loading and
+  nothing polled. The MCU's scan (16 ms) and the poll interval (up to
+  25 ms) come before it and are not measured.
+- Core 1's stack 724 bytes at most (M2: 660).
+- RAM used to 128,272 bytes, leaving **330,480 of 448 KB** (M2: 333,788);
+  `.bss` 103,928, `.data` 21,916, text 2,670,368 plus `.rodata` 919,352.
+
+**Host:** `test_keymap` passes: all 256 codes, the MCU's accepted and every
+other refused; each key's plain and shifted codes one physical key and no
+two keys one; the retranslated releases; Insert under Alt and Shift;
+stray releases, repeats, lost presses; the ASCII per key and modifier;
+the bound chords against the MCU's swallowed ones; Ctrl+Alt+Del as
+upstream's detector wants it. Two planted faults (a missing shifted
+alternate, a stray release accepted) each failed it.
+
+**Found:**
+- **A reset of the RP2350 in the middle of a southbridge transaction can
+  leave the MCU answering nothing until the PicoCalc is switched off and
+  on.** The first restart after a card went in did it: every transaction
+  after failed (NACK of the address, 1.1 ms), 1,933 errors in 67 s, and
+  the keyboard was dead though the screen looked right. Both lines read
+  high over SWD; nine clocks and a STOP did not bring it back, nor did the
+  MCU's own 2.5 s bus reset; the owner had seen it before, and a power
+  cycle cleared it. M1 and M2 polled the bus once a second and never hit
+  it; M3 is in a transaction about a fifth of the time. Every reboot now
+  parks core 1 between transactions first (§6.2), and M7's exit must too.
+  An SWD reset (`flash.sh`) can still do it; the banner says so when the
+  southbridge does not answer (HW §6.1).
+- Keys pressed while the previous image ran wait in the MCU's FIFO and
+  arrive at the next boot; upstream's welcome discards what it finds.
+- The MCU's power button sends `0x91` pressed with no release (source);
+  it is accepted and not passed on. Not observed.
+
+**Not checked:** Caps Lock (`0xc1`) on the keyboard; a card that does not
+mount, and a card without `/quest` (their pages are drawn as the no-card
+page is, but neither was shown); the PSRAM page; the release build on the
+board (built clean, not flashed); key-to-event latency from the key's
+travel, rather than from the FIFO.
+
 **M2 (display) is done**, on 2026-10-29, on the same Pimoroni Pico Plus 2 W
 in a PicoCalc, flashed over SWD, with Arm GCC 15.2.Rel1 and SDK 2.3.1,
 development build. The welcome screen checked on the panel by the owner.

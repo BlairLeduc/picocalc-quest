@@ -49,4 +49,11 @@ sb_status_t sb_write(uint8_t reg, uint8_t value, uint8_t reply[2]);
 /* Transactions that failed, of any kind. design.md §14.3 wants this at zero. */
 uint32_t sb_error_count(void);
 
+/* A reset of this processor in the middle of a transaction can leave the
+ * MCU answering nothing until the PicoCalc is switched off and on: its
+ * own 2.5 s bus reset does not bring it back, and neither do nine clocks
+ * and a STOP from this side (hardware-notes.md §6.1). So nothing may
+ * reset the processor while a transaction is in flight: core 1 parks
+ * between transactions first (core1_park). */
+
 #endif /* PICOCALC_QUEST_SOUTHBRIDGE_H */
