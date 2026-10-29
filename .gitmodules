@@ -1,0 +1,3 @@
+[submodule "modules/frank-quest"]
+	path = modules/frank-quest
+	url = https://github.com/rh1tech/frank-quest.git

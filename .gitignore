@@ -3,3 +3,8 @@
 # Build trees, UART captures and fetched test suites (design.md §5.4).
 build/
 out/
+
+# Upstream copied and patched by the build, and upstream files being
+# edited for the patch (design.md §5.1).
+/frank-quest/
+/working/

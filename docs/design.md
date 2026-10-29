@@ -19,9 +19,9 @@ Plain **§N** points within this document. Dates are written in full.
 Estimates are labelled as estimates; everything else is read from source or
 from the companions' measurements.
 
-**Status, 2026-10-29.** Design only. Nothing is built. Upstream was read at
-commit `949301b6ef87a5482340167378cd102fcdb82ef2` (2026-05-12, release
-1.00).
+**Status, 2026-10-29.** M0 built: the whole engine set links for the Plus 2
+with empty shims (§16, `milestones.md`). Upstream is pinned at commit
+`949301b6ef87a5482340167378cd102fcdb82ef2` (2026-05-12, release 1.00).
 
 **Contents**
 
@@ -117,7 +117,7 @@ compiled: the five engines and the parts of `common/`, `audio/`,
 | `src/frank_quest_selector.cpp` | 734 | Scans `/quest/*`, matches directory names to games, draws the animated list |
 | `src/frank_quest_welcome.cpp` | 1,108 | The demoscene intro shown at power-on |
 | `src/frank_quest_fs.c` | 474 | Thin file/dir layer over FatFs (`cabal_fs_*`, `cabal_dir_*`) |
-| `src/frank_quest_new.cpp`, `_memory.cpp`, `_sbrk.c` | 134 | `new`/`delete` and `malloc` routed to PSRAM |
+| `src/frank_quest_new.cpp`, `_sbrk.c` | 134 | `new`/`delete` and `malloc` routed to PSRAM (`_memory.cpp` is in the tree but not compiled) |
 | `src/backends/platform/rp2350/rp2350-system.cpp` | 590 | The `OSystem` ScummVM sees. Calls the C seam below |
 | `src/backends/platform/rp2350/rp2350-minimal.cpp` | 857 | **The C seam**: `cabal_update_screen`, `cabal_poll_event`, palette, cursor, timing, fault handler and crash record |
 | `src/board_config.h` | 198 | M1/M2 pin layouts, screen size, PSRAM pin by package |
@@ -203,7 +203,7 @@ picocalc-quest/
   picocalc/                   the port's own code (§5.3)
   test/                       host tests for picocalc/ (§15)
   scripts/                    apply_patch.sh, create_patch.sh, check_sources.sh,
-                              build_release.sh, flash.sh, capture.sh
+                              build.sh, build_release.sh, flash.sh, capture.sh
   docs/                       hardware-notes.md, emulator-lessons.md, design.md,
                               milestones.md (from M0)
 ```
@@ -255,7 +255,7 @@ The expected patch, to be confirmed at M0:
 | `src/board_config.h` | M1/M2 layouts replaced by one PicoCalc block. |
 | `drivers/psram_allocator.c` | A third framebuffer slot (§7.2). |
 | `drivers/sdcard/sdcard.c` | `CLK_FAST` made overridable, set to 25 MHz (§10). Its `get_fattime()` (always 0) compiled out in favour of the PicoCalc one (§13.2). |
-| `src/backends/platform/rp2350/rp2350-system.cpp` | `getTimeAndDate()` asks the PicoCalc clock (§13.2), keeping upstream's made-up date as the fallback. |
+| `src/backends/platform/rp2350/rp2350-system.cpp` | `getTimeAndDate()` asks the PicoCalc clock (§13.2), keeping upstream's made-up date as the fallback. `initBackend()` creates the mixer at a literal 44,100 Hz, so the rate comes from the audio shim instead (§8.2; found in M0). |
 | `src/frank_quest_welcome.cpp`, `src/frank_quest_selector.cpp` | Text that names PS/2, mouse clicks or HDMI. |
 
 Each patched hunk carries a comment citing the section of this document
@@ -453,7 +453,8 @@ core 1 would break that protection, so the port keeps upstream's shape:
   bits, each written twice for oversample 2), and re-arms the channel.
 - `DMA_IRQ_0` at priority `0x40`, above everything else on core 0 (HW §5.4).
 - The audio shim keeps upstream's `cabal_audio_*` names and its startup
-  mute, so `rp2350-system.cpp` needs no audio changes.
+  mute. The one audio change to `rp2350-system.cpp` is the mixer's rate,
+  which upstream writes as a literal 44,100 (§5.3).
 
 ### 8.3 Ring size and deadline
 
@@ -673,9 +674,11 @@ There is no no-flash build: the image is seven times SRAM.
 
 Upstream's linker script allots 448 KB to RAM (code in SRAM, data, BSS,
 heap) and 64 KB to the main stack, with 4 KB each in SCRATCH_X (core 1's
-stack) and SCRATCH_Y. Upstream's actual use is not yet known; M0 reads it
-off `arm-none-eabi-size` and the map, and CI prints it on every build
-(EL §2.1).
+stack) and SCRATCH_Y. M0 measured the port's build with empty shims
+(2026-10-29, Arm GCC 15.2, SDK 2.3.1): `.data` 21,124 bytes, `.bss`
+92,280, the crash record (`.uninitialized_data`) 2,148, so RAM is used to
+115,832 bytes and **342,920 of the 448 KB are left**. CI prints the size on
+every build (EL §2.1).
 
 What the port adds, **estimated**:
 
@@ -1093,7 +1096,7 @@ Every value the port depends on that has not been checked on this hardware
 | UF2 Loader's app partition holds 3.6 MB | yes | not checked | low | M9 |
 | POWMAN timer unaffected by the move to 300 MHz | yes | timer has its own tick source; not measured | medium | M1 |
 | Shell's clock record survives into the port and reads correctly | yes | Rogue uses it; not on this image | high | M1 |
-| Upstream's SRAM use leaves room for the port | yes | linker script only | medium | M0 |
+| Upstream's SRAM use leaves room for the port | yes; 342,920 bytes left | measured, M0 build | high | Confirmed 2026-10-29 |
 | Core 1 stack of 4 KB is enough | yes | none | medium | M2 |
 
 ---
