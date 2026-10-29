@@ -1067,7 +1067,10 @@ In measured steps, each against a control build in the same sitting
 (EL §12), keeping only what pays:
 
 1. Dirty-row presenting (rows whose bytes or palette changed since the last
-   present), against full presents.
+   present), against full presents. It subsumes skipping the letterbox: a
+   200-row game is sent as 240 rows today, about 3 ms of an 18.1 ms
+   present (M2). The letterbox is palette index 0, not always black, and
+   upstream's cursor can be drawn into it, so it cannot simply be skipped.
 2. SRAM placement of hot code in tiers: mixer and rate converter, the OPL
    core, the engines' blitters and decompressors, identified by sampling
    the PC over SWD (HW §9.2, §9.8; each tier in its own build directory,
