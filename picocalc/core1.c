@@ -42,6 +42,7 @@ core1_bringup_t g_core1 = { .sb_version = -1 };
 extern uint32_t __StackOneBottom, __StackOneTop;
 
 volatile uint32_t g_core0_delay_us;
+volatile uint32_t g_core0_update_us, g_core0_updates;
 
 static volatile bool s_park, s_parked;
 
@@ -51,8 +52,11 @@ void core1_park(void) {
     while (!s_parked && time_us_32() - t0 < 100000u) tight_loop_contents();
 }
 
+#if PICOCALC_QUEST_TEST_PATTERN
 /* The corner-coded test pattern (EL §13.3, hardware-notes.md §10):
- * orientation, colour order and all four edges, by eye.
+ * orientation, colour order and all four edges, by eye. Drawn at boot
+ * only in a build that asks for it (M1's bring-up); otherwise the panel
+ * stays black until the first frame.
  *
  *   - red square top left, green top right, blue bottom left, white
  *     bottom right, 32 pixels each;
@@ -85,6 +89,7 @@ static void test_pattern(void) {
     lcd_fill(0, h - sq, sq, sq, RGB565(0, 0, 255));
     lcd_fill(w - sq, h - sq, sq, sq, white);
 }
+#endif
 
 /* ---- the presenter (§7.3) ----------------------------------------- */
 
@@ -165,13 +170,15 @@ void core1_main(void) {
     if (sb_read(SB_REG_VER, r) == SB_OK) g_core1.sb_version = r[1];
     g_core1.i2c_us = time_us_32() - t0;
 
-    /* 2. The LCD, cleared before DISPON, then the pattern. */
+    /* 2. The LCD, cleared before DISPON, then the pattern if asked for. */
     t0 = time_us_32();
     g_core1.spi_hz = lcd_init();
     g_core1.lcd_us = time_us_32() - t0;
+#if PICOCALC_QUEST_TEST_PATTERN
     t0 = time_us_32();
     test_pattern();
     g_core1.pattern_us = time_us_32() - t0;
+#endif
 
     board_temp_init();
 #if PICOCALC_QUEST_FB_READ == FB_READ_DMA
@@ -188,6 +195,7 @@ void core1_main(void) {
     uint32_t next_bat = now, next_kbd = now, next_beat = now + HEARTBEAT_US;
     uint32_t seconds = 0, loops = 0;
     uint32_t last_pub = 0, last_drop = 0, last_presents = 0, last_delay = g_core0_delay_us;
+    uint32_t last_update = g_core0_update_us, last_updates = g_core0_updates;
     uint32_t last_taken = 0, last_wait = 0;
     for (;;) {
         log_pump();
@@ -214,8 +222,9 @@ void core1_main(void) {
         }
         if (frame >= 0) {
             if (!bands_cleared) {
-                /* The test pattern's corners and border go with the
-                 * first frame: the bands are black (§7.4). */
+                /* The bands are black (§7.4): the test pattern's
+                 * corners and border, if drawn, go with the first
+                 * frame. */
                 lcd_fill(0, 0, LCD_PANEL_W, FRAME_Y, 0);
                 lcd_fill(0, FRAME_Y + FRAME_H, LCD_PANEL_W, LCD_PANEL_H - FRAME_Y - FRAME_H, 0);
                 bands_cleared = true;
@@ -247,19 +256,24 @@ void core1_main(void) {
             next_beat += HEARTBEAT_US;
             seconds++;
             uint32_t pub, drop, delay = g_core0_delay_us;
+            uint32_t update = g_core0_update_us, updates = g_core0_updates;
             uint32_t taken = g_input_taken, wait = g_input_wait_sum_us;
             video_counts(&pub, &drop);
             /* Core 0's busy share: the second's wall time not in
              * cabal_delay (§14.3), in thousandths. */
             uint32_t idle = delay - last_delay;
             uint32_t busy = idle >= HEARTBEAT_US ? 0 : 1000u - idle / (HEARTBEAT_US / 1000u);
-            printf("hb %lu: core 0 busy %lu.%lu%%, frames %lu, presented %lu, dropped %lu, "
+            /* Of the second, the share in upstream's screen update. */
+            uint32_t upd = (update - last_update) / (HEARTBEAT_US / 1000u);
+            printf("hb %lu: core 0 busy %lu.%lu%%, update %lu.%lu%% in %lu calls, frames %lu, presented %lu, dropped %lu, "
                    "present %lu us (max %lu), publish max %lu us, core 1 stack %lu B; "
                    "keys %lu (wait mean %lu max %lu us), ring full %lu, unknown %lu, "
                    "stray %lu; temp %d C, battery %d%%%s, i2c errors %lu, log dropped %lu, "
                    "core 1 loops %lu\n",
                    (unsigned long)seconds, (unsigned long)(busy / 10u),
-                   (unsigned long)(busy % 10u), (unsigned long)(pub - last_pub),
+                   (unsigned long)(busy % 10u), (unsigned long)(upd / 10u),
+                   (unsigned long)(upd % 10u), (unsigned long)(updates - last_updates),
+                   (unsigned long)(pub - last_pub),
                    (unsigned long)(s_present.presents - last_presents),
                    (unsigned long)(drop - last_drop), (unsigned long)s_present.last_us,
                    (unsigned long)s_present.max_us, (unsigned long)g_video_publish_max_us,
@@ -275,6 +289,8 @@ void core1_main(void) {
             last_drop = drop;
             last_presents = s_present.presents;
             last_delay = delay;
+            last_update = update;
+            last_updates = updates;
             last_taken = taken;
             last_wait = wait;
             loops = 0;

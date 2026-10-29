@@ -74,6 +74,19 @@ else()
     # 0 cached, 1 uncached, 2 DMA, 3 none (picocalc/video.h); M2 measured
     # them and kept DMA, which cost core 0 least (§7.3).
     set(PICOCALC_QUEST_FB_READ 2 CACHE STRING "How core 1 reads frames from the PSRAM")
+    # ON checks upstream's skipped screen updates (rp2350-system.cpp, M4):
+    # a checksum of the game's screen at each skip, and a log line when it
+    # changed with nothing marking it. A diagnostic: it costs core 0 a
+    # PSRAM read of the screen per skip.
+    option(PICOCALC_QUEST_SCREEN_CHECK "log screen writes the update skip missed" OFF)
+    # ON draws M1's corner-coded test pattern at boot, for bring-up
+    # (picocalc/core1.c); OFF, the panel stays black until the first frame.
+    option(PICOCALC_QUEST_TEST_PATTERN "draw the test pattern at boot" OFF)
+    if (PICOCALC_QUEST_SCREEN_CHECK)
+        set(PICOCALC_QUEST_SCREEN_CHECK_ON 1)
+    else()
+        set(PICOCALC_QUEST_SCREEN_CHECK_ON 0)
+    endif()
     if (PICOCALC_QUEST_UART)
         set(PICOCALC_QUEST_UART_ON 1)
     else()
@@ -107,6 +120,7 @@ else()
         picocalc/board.c
         picocalc/clock.c
         picocalc/core1.c
+        picocalc/fatal.c
         picocalc/font8x10.c
         picocalc/framepool.c
         picocalc/input_shim.c
@@ -191,6 +205,8 @@ else()
         PICO_DEFAULT_UART_RX_PIN=3
         # How core 1 reads frames from the PSRAM (video.h, §7.3).
         PICOCALC_QUEST_FB_READ=${PICOCALC_QUEST_FB_READ}
+        PICOCALC_QUEST_SCREEN_CHECK=${PICOCALC_QUEST_SCREEN_CHECK_ON}
+        PICOCALC_QUEST_TEST_PATTERN=$<BOOL:${PICOCALC_QUEST_TEST_PATTERN}>
     )
 
     # As upstream: dlmalloc in mspace-only mode over PSRAM, with footers
@@ -220,12 +236,17 @@ else()
     pico_enable_stdio_uart(picocalc-quest 0)
     pico_enable_stdio_usb(picocalc-quest 0)
 
-    # Core 0's time in upstream's delay, for the heartbeat (main.c, §14.3),
-    # and upstream's scan of /quest, timed (main.c, §16 M3), by its C++
-    # name: frank_quest_scan_games(QuestGame *, int).
+    # Core 0's time in upstream's delay and screen update, for the
+    # heartbeat (main.c, §14.3); upstream's scan of /quest, timed (main.c,
+    # §16 M3), by its C++ name: frank_quest_scan_games(QuestGame *, int);
+    # the PSRAM mspace's creation, so the selector can report the heap
+    # (main.c, M4); and exit(), which error() ends in (fatal.c).
     target_link_options(picocalc-quest PRIVATE
         -Wl,--wrap=cabal_delay
-        -Wl,--wrap=_Z22frank_quest_scan_gamesP9QuestGamei)
+        -Wl,--wrap=cabal_update_screen
+        -Wl,--wrap=_Z22frank_quest_scan_gamesP9QuestGamei
+        -Wl,--wrap=create_mspace_with_base
+        -Wl,--wrap=exit)
 
     # Upstream's linker script: the 64 KB main stack the GOB engine needs
     # (§5.4, §12.1).

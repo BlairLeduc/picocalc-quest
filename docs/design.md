@@ -252,6 +252,7 @@ them by. Then those upstream files compile **unchanged**.
 | `cabal_audio_init`, `_shutdown`, `_set_mixer_callback`, `_process_frame`, `_set_volume`, `_needs_samples`, … | `drivers/audio/audio.c` | `picocalc/audio_shim.c` over the PWM driver (§8) |
 | `ps2kbd_init`, `ps2kbd_flush` | `drivers/ps2/` | `picocalc/input_shim.c`: start and flush the PicoCalc input queue |
 | `main()` | `src/main.c` | `picocalc/main.c` (§13) |
+| `exit()`, which `error()` ends in | newlib, then the SDK's `bkpt` | `picocalc/fatal.c`, by link wrap: the error page (§13.1; M4) |
 
 Where upstream's semantics do not fit a shim, the upstream file is patched.
 The expected patch, to be confirmed at M0:
@@ -261,8 +262,10 @@ The expected patch, to be confirmed at M0:
 | `src/backends/platform/rp2350/rp2350-minimal.cpp` | `cabal_poll_event()` takes its key events from the PicoCalc input layer (§9; done in M3, keys only: the mouse block stays, fed nothing, until M6). Its PS/2 path cannot be shimmed honestly: it gets F-keys as private ASCII bytes that never become `CABAL_KEY_F*`, and it wants mouse deltas. `cabal_system_init()` loses the PS/2 mouse start-up (M3). |
 | `src/board_config.h` | M1/M2 layouts replaced by one PicoCalc block. |
 | `drivers/sdcard/sdcard.c` | `CLK_FAST` made overridable, set to 25 MHz (§10). Its `get_fattime()` (always 0) compiled out in favour of the PicoCalc one (§13.2). |
-| `src/backends/platform/rp2350/rp2350-system.cpp` | `getTimeAndDate()` asks the PicoCalc clock (§13.2), keeping upstream's made-up date as the fallback. `initBackend()` creates the mixer at a literal 44,100 Hz, so the rate comes from the audio shim instead (§8.2; found in M0). |
-| `src/frank_quest_welcome.cpp`, `src/frank_quest_selector.cpp` | Text that names PS/2, mouse clicks or HDMI. |
+| `src/backends/platform/rp2350/rp2350-system.cpp` | `updateScreen()` copies and publishes a frame only when something shown has changed, and hands its own surface to `cabal_update_screen()` in place of a second copy (§7.2; M4). `logMessage()` passes an error's message to the error page (§13.1; M4). To come: `getTimeAndDate()` asks the PicoCalc clock (§13.2, M7), keeping upstream's made-up date as the fallback; `initBackend()` creates the mixer at a literal 44,100 Hz, so the rate comes from the audio shim instead (§8.2, M5; found in M0). |
+| `src/frank_quest_main.cpp` | The Gob, SCI and Kyra launchers look the folder's game up in the engine's own ScummVM table, by its files' MD5s and sizes, and launch with that entry; upstream fixes one version per game, whatever the files (§10.2; M4). Each AGI game gets its own config domain, so its own saves (M4). |
+| `src/frank_quest_selector.cpp` | More AGI games by folder name (§10.2; M4). To come: text that names PS/2, mouse clicks or HDMI, with `src/frank_quest_welcome.cpp`. |
+| `src/engines/gob/detection/detection.cpp`, `src/engines/sci/detection.cpp`, `src/engines/kyra/detection.cpp` | A function returning the engine's ScummVM table, which is `static` (M4). |
 
 Each patched hunk carries a comment citing the section of this document
 that requires it (EL §14.1).
@@ -396,6 +399,19 @@ under one SIO spinlock, and a dropped-frame counter.
   table into the buffer's record. Core 1 never sees a palette half-written,
   and a palette change with identical pixels (fades, colour cycling) is
   still a change (EL §5.3, step 1).
+- **A frame only when something changed** (found in M4). Upstream's
+  `OSystem_RP2350::updateScreen()` copied the game's 64 KB screen into a
+  second buffer and that into a frame on every call, PSRAM to PSRAM,
+  9.6 ms a copy, and engines call it 35–45 times a second whether or not
+  they drew: 64–83 % of core 0 was `memcpy`. The patch marks the screen
+  changed in every OSystem call that writes it or the overlay (and in
+  `lockScreen()`, since the engine may write anywhere until it unlocks),
+  and on a new palette, cursor shape, position or visibility; otherwise
+  `updateScreen()` runs only the timers. When it does publish, the
+  minimal backend reads the game's surface directly, one copy instead of
+  two. `PICOCALC_QUEST_SCREEN_CHECK=ON` builds a check that checksums the
+  screen at each skip and logs any change nothing marked; it found none
+  in Gobliins 2 or Space Quest IV.
 
 ### 7.3 The presenter
 
@@ -473,6 +489,16 @@ core 1 would break that protection, so the port keeps upstream's shape:
 - The audio shim keeps upstream's `cabal_audio_*` names and its startup
   mute. The one audio change to `rp2350-system.cpp` is the mixer's rate,
   which upstream writes as a literal 44,100 (§5.3).
+
+Until M5 the shim runs the mixer silently (found in M4): each
+`cabal_audio_process_frame()` mixes the frames real time has used, at
+44,100 Hz, into scratch. With the mixer never called, a sound never ended,
+and CD titles (Kyrandia, Space Quest IV) waited for their first voice line
+for ever, in loops that poll no input. That puts the mixer's cost on core 0
+already: in Fate of Atlantis's intro, MAME's OPL2 emulator alone took
+**48 %** of core 0 at 44,100 Hz, and the title's median busy share went
+from 13 % to 70 %. The rate is M5's first lever; DOSBox's OPL emulator
+(which SCI uses) looked far cheaper in Space Quest IV.
 
 ### 8.3 Ring size and deadline
 
@@ -627,13 +653,30 @@ it mounted.
 
 ### 10.2 Card layout
 
-Upstream's, unchanged, so a card works on both:
+Upstream's, so a card works on both, with more AGI names (M4):
 
 ```
 /quest/<game dir>/     game data, names as upstream's README tables
 /quest/saves/          ScummVM saves (upstream's DefaultSaveFileManager path)
 /quest/picocalc.ini    this port's settings (§10.3)
 ```
+
+Upstream knows one AGI folder, `agi`, run as a generic fan-made game. The
+port adds `kq1`, `kq2`, `kq3`, `sq1`, `sq2`, `lsl1` and `pq1` as AGI when
+the folder has `LOGDIR`, checked before SCI, which remade four of them
+under the same names; without `LOGDIR`, `kq1` and the rest stay SCI. Each
+AGI folder saves under its own config domain, `quest-<folder>` (`agi`
+keeps upstream's `quest-agi`).
+
+Upstream also launched each Gob, SCI and Kyra game as one fixed version: a
+CD release ran as the floppy, and showed wrong colours (Gobliiins, EGA),
+sat on a still screen (Gobliins 2), or faulted (Kyrandia, CD). The port
+matches the folder's files against the engine's ScummVM table, every file
+an entry names, by the MD5 of its start and its size, as ScummVM's
+detector does (5,000 bytes; Kyra's, 1 MB), preferring DOS and English, and
+launches with that entry; upstream's version is the fallback. The log
+names the entry. Kyrandia's CD version needs upstream's `KYRA.DAT`
+(`dists/engine-data/`) in its folder.
 
 The selector skips macOS's `._` files (HW §7.1) if upstream does not
 already.
@@ -781,6 +824,18 @@ watches card detect, debounced for 500 ms (HW §7.1): once a card is in
 that was not before (inserted into an empty slot, or taken out and put
 back), the program restarts itself, parking core 1 first (§6.2). An empty
 `/quest` is upstream's selector's to say.
+
+A game that stops with ScummVM's `error()` gets a page too (M4). `error()`
+ends in `exit()`, and the SDK's `_exit()` is a breakpoint: the panel froze
+on the last frame, with the core halted under the probe or faulted
+without it. The patched `logMessage()` keeps the error's message, the link
+wraps `exit()` (`fatal.c`), and core 1 draws "The game stopped with an
+error." with the message wrapped below it; any key restarts the program,
+since engine state is past saving.
+
+The test pattern of M1 is drawn at boot only with
+`PICOCALC_QUEST_TEST_PATTERN=ON`; otherwise the panel stays black until
+the welcome screen.
 
 ### 13.2 The date and time
 
@@ -1061,6 +1116,15 @@ higher clock (D5). Record the result either way.
 reaches its first interactive screen; ten selector round trips leave the
 PSRAM heap where it started.
 
+**Done** 2026-10-29 (`milestones.md`). The gate failed first, on every
+title (84–98 %), and the cause was upstream's screen copies, not the
+engines (2–5 %), which none of M8's levers reach; with the owner's
+agreement the first lever became cutting them (§7.2), and every title then
+passed (14–54 % busiest). Found on the way: upstream's fixed versions per
+game (§10.2), its one AGI folder (§10.2), `error()` freezing the panel
+(§13.1), and a mixer never run (§8.2), which put audio's cost in view:
+Fate of Atlantis's OPL music takes 48 % of core 0 at 44,100 Hz.
+
 ### M5: Audio
 
 - PWM driver adapted from `pico-oric` (§8.1); the audio shim; the mixer in
@@ -1157,7 +1221,7 @@ Every value the port depends on that has not been checked on this hardware
 | SD at 25 MHz on `spi0` with upstream's driver | works | mounted and read through M3, two games launched | high | Confirmed 2026-10-29 |
 | F6–F10 codes `0x86`–`0x90` | F7–F9 = `0x87`–`0x89` | observed, M3 | high | Confirmed 2026-10-29 |
 | Ctrl+Alt+Del delivered by the MCU | yes | used on the keyboard by the owner, M3 | high | Confirmed 2026-10-29 |
-| Mixer half fits 14 ms with OPL at 300 MHz | yes | none | low | M5 |
+| Mixer half fits 14 ms with OPL at 300 MHz | yes | MAME's OPL2 at 44,100 Hz took 48 % of core 0 in Fate of Atlantis's intro (M4, silent mixer) | low | M5, at the design's 36,621 Hz and with each engine's OPL emulator |
 | PSRAM frame read cost | hidden behind the wire; 6 % of core 0 by DMA | measured, M2 (§7.3) | high | Confirmed 2026-10-29; M8 measures under engines |
 | UF2 Loader's app partition holds 3.6 MB | yes | not checked | low | M9 |
 | POWMAN timer unaffected by the move to 300 MHz | yes | read either side of the switch, M1 | high | Confirmed 2026-10-29 |
@@ -1171,7 +1235,7 @@ Every value the port depends on that has not been checked on this hardware
 
 | Risk | Effect | Mitigation |
 |---|---|---|
-| 300 MHz is too slow for SCUMM v6/v7 or SCI1.1 with music | Games run slow, audio late | Gate at M4 before audio and pointer work; levers in M8; a higher clock as a last, explicit decision |
+| 300 MHz is too slow for SCUMM v6/v7 or SCI1.1 with music | Games run slow, audio late | Gate at M4: the engines passed (14–54 %) once upstream's screen copies went; music synthesis is the cost now (OPL, 48 % in one title at 44,100 Hz), M5's to bring down; levers in M8; a higher clock as a last, explicit decision |
 | XIP cache contention between engine code, PSRAM data and the presenter | Core 0 slower than upstream's single-core numbers suggest | Measure read strategies in M2; SRAM placement in M8 |
 | Mixer IRQ held off by `lockMutex` longer than a half | Clicks | Late-refill counter; ring resized in M5 |
 | Keyboard pointer too clumsy for pixel-hunting games | Poor play | Acceleration plus Ctrl nudges; owner play-test in M6; settings |
@@ -1201,3 +1265,11 @@ Every value the port depends on that has not been checked on this hardware
   settings file proves awkward in use.
 - **Hardware vertical scroll.** Nothing scrolls in a way it would help.
 - **SCUMM v8 and The Dig.** When upstream builds them.
+- **AGI's busy-wait for a key** (found in M4). A script that asks "is a key
+  pressed?" over and over within one cycle, as King's Quest III's help
+  screen does, gets an event poll with no sleep each time, and core 0 runs
+  at 100 % until a key comes; upstream's on every platform. A short sleep
+  after several such tests without the game advancing would fix it. M8, or
+  sooner if battery life shows it.
+- **SCI games share one config domain**, `quest-sci`, so one SCI game's
+  saves can overwrite another's (found in M4; AGI's are fixed). M7.

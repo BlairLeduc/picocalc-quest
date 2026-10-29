@@ -30,6 +30,11 @@ extern core1_bringup_t g_core1;
  * kept by core 0 (main.c) for the heartbeat's busy share (§14.3). */
 extern volatile uint32_t g_core0_delay_us;
 
+/* Core 0's time in upstream's cabal_update_screen since boot, and its
+ * calls, kept by core 0 (main.c): the share of the busy time that is
+ * copying the game's screen into a frame (M4's gate, §16). */
+extern volatile uint32_t g_core0_update_us, g_core0_updates;
+
 /* Core 0, before a reboot: core 1 stops between two transactions and
  * stays stopped, so the reboot cannot catch the southbridge mid-way
  * (southbridge.h). Returns once it has, or after 100 ms. */

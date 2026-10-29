@@ -15,10 +15,18 @@ typedef enum {
     PAGE_NO_CARD,      /* card detect says the slot is empty      */
     PAGE_CARD_FAILED,  /* a card is in, but did not mount         */
     PAGE_NO_QUEST,     /* the card has no /quest                  */
+    PAGE_GAME_ERROR,   /* upstream's error() ended the game       */
 } page_t;
+
+/* The longest message a page shows; longer is cut. */
+#define PAGE_MESSAGE_MAX 320
 
 /* Core 0: show a page. Core 1 draws it on its next loop. */
 void page_show(page_t p);
+
+/* Core 0: show a page with a message of its own, wrapped to the panel's
+ * width. The message is read when core 1 draws it, so it must stay. */
+void page_show_message(page_t p, const char *message);
 
 /* Core 1: the page core 0 asked for, and drawing it. */
 page_t page_wanted(void);

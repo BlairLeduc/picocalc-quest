@@ -4,6 +4,121 @@ What each milestone verified, on which board, on what date, and what was
 not checked, newest first. `design.md` §16 holds each milestone's scope
 and done-when criteria; this file keeps the full record.
 
+**M4 (first games, and the gate) is done**, on 2026-10-29, on the same
+Pimoroni Pico Plus 2 W in a PicoCalc, flashed over SWD, with Arm GCC
+15.2.Rel1 and SDK 2.3.1, development build. An AGI game played for 11
+minutes, every engine's intro to a screen it could act in, and the
+colours, checked by the owner. **The gate passes**, after a lever the
+design did not have (below).
+
+- **The gate failed first, on every title, 84–98 %** at the busiest 5 s.
+  PC samples over SWD (`scripts/profile.sh`) put 64–83 % of core 0 in
+  `memcpy` and `memset`, and the engines at 2–5 %: upstream's
+  `updateScreen()` copied the game's 64 KB screen twice per call, PSRAM to
+  PSRAM, 9.6 ms a copy, 35–45 calls a second, changed or not. None of
+  M8's levers reach that. With the owner's agreement the first lever
+  became cutting the copies (§7.2): a frame only when something shown has
+  changed, and one copy instead of two. `memcpy` fell to 4 %.
+- **Upstream launched each Gob, SCI and Kyra game as one fixed version**,
+  whatever the files. Five of the six such titles on the card are CD
+  releases.
+  Gobliiins ran as the EGA floppy (dark, colours missing), Gobliins 2 as
+  the VGA floppy (a still screen), Kyrandia as the floppy (a fault in its
+  animation decoder), SQ4 without `ADGF_CD`. The launchers now match the
+  folder's files against the engine's ScummVM table, as ScummVM's detector
+  does, and launch with that entry (§10.2): `gob1cd` v1.02, `gob2cd`
+  v2.01, `gob3cd` v1.02, `kyra1` CD, `sq3`, `sq4` CD, each named in the log.
+  Kyra's table leaves language and platform to the entry, as
+  `createInstance()` fills them; without that, `KYRA.DAT` was asked for an
+  unknown platform.
+- **Upstream knows one AGI folder**, `agi`; the card's `kq1` (the AGI
+  original) launched as SCI's remake and stopped at `vocab 996`. The
+  selector now takes `kq1`–`kq3`, `sq1`, `sq2`, `lsl1` and `pq1` as AGI
+  when they hold `LOGDIR`, ahead of SCI; each AGI game saves under its own
+  domain (§10.2).
+- **`error()` froze the panel** (`exit()` ends in a breakpoint). It now
+  shows a page with the message, and a key restarts (§13.1, `fatal.c`).
+- **The mixer had never run** (the M0 shim kept its callback and never
+  called it), so a sound never ended: Kyrandia's and SQ4's CD intros
+  waited for their first voice line in loops that poll no input, deaf to
+  Ctrl+Alt+Del. The shim now mixes silently into scratch at 44,100 Hz
+  until M5 (§8.2).
+- The heartbeat adds core 0's share in upstream's screen update and its
+  calls; the selector logs both heaps at each entry; the M1 test pattern
+  is drawn only with `PICOCALC_QUEST_TEST_PATTERN=ON`.
+- **Scripts**: `gate.sh` (each title's busy share from a log, and the heap
+  at each selector entry), `roundtrip.sh`, `profile.sh` (PC samples, HW
+  §2.7). `PICOCALC_QUEST_SCREEN_CHECK=ON` builds the check of §7.2.
+
+**Checked on the board** (UART logs `out/m4-*.log`, profiles
+`out/m4-profile*.report`, not committed):
+
+- **By the owner, on the keyboard**: King's Quest III played for **11
+  minutes**, 2,035 key events, none lost or unknown, 0 I²C errors.
+  Gobliiins, Gobliins 2 and Goblins 3 to their first interactive screens,
+  colours right (after the table lookup); Kyrandia's intro through to its
+  first scene; SQ4's menu and pointer, Enter, and its intro. With M3's
+  Fate of Atlantis and SQ3, **every engine reaches an interactive
+  screen.**
+- **Ten selector round trips** (`roundtrip.sh`, King's Quest III and II
+  in turn, 20 s each): all launched and quit cleanly. Over the 16 selector
+  entries of that session, and 13 in the final pass, the heap was the same
+  every time: **PSRAM 263,728 B in use, SRAM heap 0 B**.
+- **The gate**, the busiest 5 s after the first 5 s of loading, core 0
+  busy share (§14.3):
+
+  | Title | Upstream's copies | Copies cut | Plus the silent mixer |
+  |---|---:|---:|---:|
+  | AGI: SQ2 / KQ1 / KQ2 / KQ3 | 84 (SQ2) | 15 / 27 / 15 / 41 | 22 / 28 / 18 / 44 |
+  | Gobliiins / 2 / 3 | 85 / 87 / 98 | 20 / — / 21 | 22 / 20 / 28 |
+  | Fate of Atlantis (intro) | 94 | 54 | **98** |
+  | Kyrandia | — | — | 66 |
+  | Space Quest III / IV | — | 36 / 14 | 62 / 19 |
+
+  "Copies cut" is the gate as the design states it, audio not yet
+  present: **every title under 75 %**. Gobliins 2 sent no frames then
+  (its version was wrong); Kyrandia had not yet run. With the mixer
+  running silently Fate of Atlantis is over, at a median of 70 %: MAME's
+  OPL2 emulator alone is **48 %** of core 0 at 44,100 Hz (M5).
+- **The error page**: SCI's `vocab 996` and Kyra's missing `KYRA.DAT`,
+  each shown with its message, and a key restarted the program.
+- **The update skip's check**: Gobliins 2 and SQ4 (then on the wrong
+  versions) checksummed at every skipped update for 40 s each, 0 changes
+  missed.
+- 0 I²C errors and 0 ring full throughout; 813 log lines dropped, all
+  upstream's Kyra heap walks while loading.
+
+**Measured** (development build):
+
+- Upstream's `cabal_update_screen()`: **9.6 ms a call** (a 64,000-byte
+  copy PSRAM to PSRAM, 12,800 bytes cleared, the cache clean, the
+  publish); the welcome screen spends 27–37 % of core 0 in it.
+- `profile.sh`: about **4,000 samples a second** at 5 MHz SWD, the
+  program running on.
+- King's Quest III's help screen: **100 % of core 0** until a key, in
+  AGI's "is a key pressed?" test, which polls without sleeping (§19).
+- Core 1's stack 748 bytes at most (M3: 724).
+- RAM used to 130,688 bytes, leaving **328,064 of 448 KB** (M3: 330,480);
+  `.bss` 106,336, `.data` 21,924, text 2,673,212 plus `.rodata` 1,045,824
+  (+129 KB, most of it the SCI and Kyra tables).
+
+**Host:** the five tests pass, the patch round trip with the patch now
+nine files; `check_sources.sh` 533 compiled, 7 excluded.
+
+**Found:**
+- The copies, the fixed versions, the one AGI folder, the frozen error
+  and the mixer never run (above).
+- With the probe attached, the halted core stops the timer, and core 1's
+  `busy_wait_us` with it: no log, no display (HW §2.7). The log ring was
+  read over SWD to find the error.
+- Gob and the other point-and-click engines take only the arrows' codes
+  from the keyboard; moving the pointer is M6.
+- SCI games share one config domain, so their saves can collide (§19, M7).
+
+**Not checked:** a full play of any title but King's Quest III; the
+release build on the board; audio of any kind (M5); the pointer (M6);
+saves (M7); the AGI help screen's busy-wait fixed (deferred, §19).
+
 **M3 (card and keyboard) is done**, on 2026-10-29, on the same Pimoroni
 Pico Plus 2 W in a PicoCalc, flashed over SWD, with Arm GCC 15.2.Rel1 and
 SDK 2.3.1, development build. The selector, the games launching, every key
