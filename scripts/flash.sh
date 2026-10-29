@@ -59,7 +59,7 @@ fi
 # symptom is a firmware whose core 1 prints its first line and goes silent.
 # A power-on reset does not do this; only the debugger's does.
 echo "flash.sh: $(basename "$image") -> $target via $openocd"
-exec "$openocd" "${scripts[@]}" \
+exec "$openocd" ${scripts[@]+"${scripts[@]}"} \
     -f interface/cmsis-dap.cfg \
     -f "target/$target.cfg" \
     -c "adapter speed ${SWD_KHZ:-5000}" \
