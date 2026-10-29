@@ -68,4 +68,9 @@ between builds from the same path.
 CI's first firmware build was killed by the runner when an unbounded
 `make -j` ran some 600 compilers at once; CI now runs `-j $(nproc)`.
 
-**Not checked:** the firmware with CI's Arm GCC 13.2, until CI passes; `_unlink` deleting a save (M7); anything on the device.
+**Checked on CI** (Ubuntu, GNU `patch` and `diff`, Arm GCC 13.2.Rel1, SDK
+2.3.1), 2026-10-29, commit `354f6e7`: both host tests, `check_sources.sh`,
+and both firmware builds pass. GCC 13.2's text is 3,566,940 bytes
+(development) and 3,565,256 (release), about 28 KB less than 15.2's.
+
+**Not checked:** `_unlink` deleting a save (M7); anything on the device.
