@@ -20,7 +20,10 @@ Estimates are labelled as estimates; everything else is read from source or
 from the companions' measurements.
 
 **Status, 2026-10-29.** M0 built: the whole engine set links for the Plus 2
-with empty shims (§16, `milestones.md`). Upstream is pinned at commit
+with empty shims. M1 run on the board: 300 MHz at 1.20 V, the log ring,
+banner and heartbeat over UART0, PSRAM checked, the southbridge, and the
+LCD's test pattern; the owner's look at the panel is outstanding (§16,
+`milestones.md`). Upstream is pinned at commit
 `949301b6ef87a5482340167378cd102fcdb82ef2` (2026-05-12, release 1.00).
 
 **Contents**
@@ -660,9 +663,11 @@ on the panel instead of booting into a corrupt heap.
 The image is ~3.6 MB of 16 MB. Code runs from flash through the 16 KB XIP
 cache shared with PSRAM, and ScummVM is large and branchy, the kind of code
 whose speed is instruction fetch (HW §9.2). The bootrom's divider doubled
-puts flash at 50 MHz at 300 MHz (HW §3); upstream ran it at 66 MHz. A
-faster flash clock (divider 4, 75 MHz) is a lever for M8, qualified for
-data integrity before use.
+puts flash at 50 MHz at 300 MHz (HW §3); upstream ran it at 66 MHz. Any
+flash command puts the bootrom's timing back (HW §3; found in M1), so
+the port reads the flash's id before the clock moves and makes no other
+flash command (D10). A faster flash clock (divider 4, 75 MHz) is a lever
+for M8, qualified for data integrity before use.
 
 There is no no-flash build: the image is seven times SRAM.
 
@@ -1086,7 +1091,7 @@ Every value the port depends on that has not been checked on this hardware
 | Constant | Value | Source | Confidence | Settled in |
 |---|---|---|---|---|
 | Stable at 300 MHz, 1.20 V, under this workload | yes | HW §3 (other workloads) | medium | M4, M8 soak |
-| PSRAM at 100 MHz (divider 3) at 300 MHz | works | upstream release default; HW §2.4 | medium | M1 |
+| PSRAM at 100 MHz (divider 3) at 300 MHz | works | the M1 round trip, 32,790 words | high | Confirmed 2026-10-29 |
 | LCD SPI at 75 MHz | works | HW §4.2, §4.7 | high | M1 |
 | SD at 25 MHz on `spi0` with upstream's driver | works | HW §7.1 (another driver) | medium | M3 |
 | F6–F10 codes `0x86`–`0x90` | F7–F9 = `0x87`–`0x89` assumed | HW §6.2 (F6, F10 observed) | medium | M3 |
@@ -1094,8 +1099,8 @@ Every value the port depends on that has not been checked on this hardware
 | Mixer half fits 14 ms with OPL at 300 MHz | yes | none | low | M5 |
 | PSRAM frame read cost | ~9 ms a full frame | HW §9.3 (a different copy) | low | M2 |
 | UF2 Loader's app partition holds 3.6 MB | yes | not checked | low | M9 |
-| POWMAN timer unaffected by the move to 300 MHz | yes | timer has its own tick source; not measured | medium | M1 |
-| Shell's clock record survives into the port and reads correctly | yes | Rogue uses it; not on this image | high | M1 |
+| POWMAN timer unaffected by the move to 300 MHz | yes | read either side of the switch, M1 | high | Confirmed 2026-10-29 |
+| Shell's clock record survives into the port and reads correctly | yes | read at boot, M1, after a reset over SWD | high | Confirmed 2026-10-29; started from the shell in M7 |
 | Upstream's SRAM use leaves room for the port | yes; 342,920 bytes left | measured, M0 build | high | Confirmed 2026-10-29 |
 | Core 1 stack of 4 KB is enough | yes | none | medium | M2 |
 

@@ -9,3 +9,10 @@ foreach(mode synthetic repo)
         COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_patch_roundtrip.sh ${mode})
     set_tests_properties(test_patch_roundtrip_${mode} PROPERTIES SKIP_RETURN_CODE 77)
 endforeach()
+
+# The shell's time to calendar fields (§13.2).
+add_executable(test_clock test_clock.c ${PROJECT_SOURCE_DIR}/picocalc/clock.c)
+target_include_directories(test_clock PRIVATE ${PROJECT_SOURCE_DIR}/picocalc)
+target_compile_definitions(test_clock PRIVATE PICOCALC_QUEST_HOST=1)
+target_compile_options(test_clock PRIVATE ${PICOCALC_QUEST_WARNINGS})
+add_test(NAME test_clock COMMAND test_clock)
