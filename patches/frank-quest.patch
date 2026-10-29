@@ -1,0 +1,185 @@
+--- a/drivers/sdcard/sdcard.c
++++ b/drivers/sdcard/sdcard.c
+@@ -51,7 +51,12 @@
+ #define CT_BLOCK       0x08            /* Block addressing */
+ 
+ #define CLK_SLOW	(100 * KHZ)
+-#define CLK_FAST	(30 * MHZ)
++/* picocalc-quest: overridable; the PicoCalc builds with 25 MHz, the
++ * conservative operating point for its card slot (design.md §10.1). */
++#ifndef SDCARD_CLK_FAST
++#define SDCARD_CLK_FAST	(30 * MHZ)
++#endif
++#define CLK_FAST	SDCARD_CLK_FAST
+ 
+ static volatile
+ DSTATUS Stat = STA_NOINIT;	/* Physical drive status */
+@@ -455,7 +460,9 @@
+ 
+ 
+ 
+-#if !FF_FS_READONLY && !FF_FS_NORTC
++/* picocalc-quest: SDCARD_EXTERNAL_FATTIME leaves get_fattime() to the
++ * PicoCalc clock (design.md §13.2). */
++#if !FF_FS_READONLY && !FF_FS_NORTC && !defined(SDCARD_EXTERNAL_FATTIME)
+ /* get the current time */
+ DWORD get_fattime (void)
+ {
+--- a/src/board_config.h
++++ b/src/board_config.h
+@@ -15,39 +15,25 @@
+ #include "hardware/vreg.h"
+ 
+ /*
+- * Board Configuration Variants for FRANK Quest (ScummVM port for RP2350)
++ * picocalc-quest: one board, the ClockworkPi PicoCalc with a Pimoroni Pico
++ * Plus 2 or Plus 2 W (RP2350B, 8 MB PSRAM), in place of FRANK's M1 and M2
++ * layouts (picocalc-quest design.md §4, §5.3).
+  *
+- * BOARD_M1 - M1 GPIO layout
+- * BOARD_M2 - M2 GPIO layout (default)
++ *   LCD:      spi1, GP10-15 (driven by picocalc/, not here)
++ *   SD:       spi0, MISO=16, CS=17, SCK=18, MOSI=19 (§10.1)
++ *   Keyboard: southbridge on i2c1, GP6/7 (picocalc/)
++ *   Audio:    PWM, GP26/27 (picocalc/)
++ *   UART:     UART0 on GP2/3, development builds only (§14.1)
++ *   PSRAM:    CS on GP47
+  *
+- * PSRAM pin is auto-detected based on chip package:
+- *   RP2350B: GPIO47 (for both M1 and M2)
+- *   RP2350A: GPIO19 (M1) or GPIO8 (M2)
++ * GP4/5 (the shell's DS3231), GP23-25 and GP29 (the Plus 2 W's radio,
++ * the Plus 2's LED) are never touched (§4).
+  *
+- * M1 GPIO Layout:
+- *   HDMI: CLKN=6, CLKP=7, D0N=8, D0P=9, D1N=10, D1P=11, D2N=12, D2P=13
+- *   SD:   CLK=2, CMD=3, DAT0=4, DAT3=5
+- *   PS/2 Keyboard: CLK=0, DATA=1
+- *   PS/2 Mouse: CLK=14, DATA=15
+- *   I2S:  DATA=26, CLK=27, LRCK=28
+- *
+- * M2 GPIO Layout:
+- *   HDMI: CLKN=12, CLKP=13, D0N=14, D0P=15, D1N=16, D1P=17, D2N=18, D2P=19
+- *   SD:   CLK=6, CMD=7, DAT0=4, DAT3=5
+- *   PS/2 Keyboard: CLK=2, DATA=3
+- *   PS/2 Mouse: CLK=0, DATA=1
+- *   I2S:  DATA=9, CLK=10, LRCK=11
+- *
+- * CPU/PSRAM Speed (set via CMake -DCPU_SPEED=xxx -DPSRAM_SPEED=xxx):
+- *   252 MHz - no overclock (default for stable operation)
+- *   378 MHz - medium overclock
+- *   504 MHz - high overclock
++ * The clock, rail and PSRAM speed are picocalc/'s (§11), so the CPU/PSRAM
++ * defaults below are not used; they are kept to keep this patch small.
+  */
+ 
+-// Default to M1 if no config specified
+-#if !defined(BOARD_M1) && !defined(BOARD_M2)
+-#define BOARD_M2
+-#endif
++#define BOARD_PICOCALC
+ 
+ //=============================================================================
+ // CPU/PSRAM Speed Defaults (can be overridden via CMake)
+@@ -68,12 +54,9 @@
+ // PSRAM Pin Auto-Detection
+ //=============================================================================
+ 
+-// PSRAM pin for RP2350A variants
+-#ifdef BOARD_M1
+-#define PSRAM_PIN_RP2350A 19
+-#else
++// picocalc-quest: no RP2350A board is supported (design.md §1), but
++// get_psram_pin() below still names a pin for one.
+ #define PSRAM_PIN_RP2350A 8
+-#endif
+ 
+ // PSRAM pin for RP2350B (always GPIO47)
+ #define PSRAM_PIN_RP2350B 47
+@@ -92,80 +75,17 @@
+ }
+ 
+ //=============================================================================
+-// M1 Layout Configuration
++// PicoCalc Layout Configuration (picocalc-quest design.md §4)
+ //=============================================================================
+-#ifdef BOARD_M1
+ 
+-// HDMI Pins
+-#define HDMI_PIN_CLKN 6
+-#define HDMI_PIN_CLKP 7
+-#define HDMI_PIN_D0N  8
+-#define HDMI_PIN_D0P  9
+-#define HDMI_PIN_D1N  10
+-#define HDMI_PIN_D1P  11
+-#define HDMI_PIN_D2N  12
+-#define HDMI_PIN_D2P  13
++// The SD card's SDCARD_PIN_SPI0_* are compile definitions, as upstream's
++// were, since sdcard.c does not include this file (§10.1).
+ 
+-#define HDMI_BASE_PIN HDMI_PIN_CLKN
++// No PS/2 port. rp2350-minimal.cpp names this pin until its PS/2 start-up
++// is patched out (§9, M3); picocalc/input_shim.c ignores it.
++#define PS2_MOUSE_CLK 0
+ 
+-// SD Card Pins
+-#define SDCARD_PIN_CLK    2
+-#define SDCARD_PIN_CMD    3
+-#define SDCARD_PIN_D0     4
+-#define SDCARD_PIN_D3     5
+-
+-// PS/2 Keyboard Pins
+-#define PS2_PIN_CLK  0
+-#define PS2_PIN_DATA 1
+-
+-// PS/2 Mouse Pins
+-#define PS2_MOUSE_CLK  14
+-#define PS2_MOUSE_DATA 15
+-
+-// I2S Audio Pins
+-#define I2S_DATA_PIN       26
+-#define I2S_CLOCK_PIN_BASE 27
+-
+-#endif // BOARD_M1
+-
+ //=============================================================================
+-// M2 Layout Configuration
+-//=============================================================================
+-#ifdef BOARD_M2
+-
+-// HDMI Pins
+-#define HDMI_PIN_CLKN 12
+-#define HDMI_PIN_CLKP 13
+-#define HDMI_PIN_D0N  14
+-#define HDMI_PIN_D0P  15
+-#define HDMI_PIN_D1N  16
+-#define HDMI_PIN_D1P  17
+-#define HDMI_PIN_D2N  18
+-#define HDMI_PIN_D2P  19
+-
+-#define HDMI_BASE_PIN HDMI_PIN_CLKN
+-
+-// SD Card Pins
+-#define SDCARD_PIN_CLK    6
+-#define SDCARD_PIN_CMD    7
+-#define SDCARD_PIN_D0     4
+-#define SDCARD_PIN_D3     5
+-
+-// PS/2 Keyboard Pins
+-#define PS2_PIN_CLK  2
+-#define PS2_PIN_DATA 3
+-
+-// PS/2 Mouse Pins
+-#define PS2_MOUSE_CLK  0
+-#define PS2_MOUSE_DATA 1
+-
+-// I2S Audio Pins
+-#define I2S_DATA_PIN       9
+-#define I2S_CLOCK_PIN_BASE 10
+-
+-#endif // BOARD_M2
+-
+-//=============================================================================
+ // Display Configuration
+ //=============================================================================
+ 
