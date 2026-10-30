@@ -38,3 +38,19 @@ target_compile_definitions(test_sound PRIVATE PICOCALC_QUEST_HOST=1)
 target_compile_options(test_sound PRIVATE ${PICOCALC_QUEST_WARNINGS})
 target_link_libraries(test_sound PRIVATE m)
 add_test(NAME test_sound COMMAND test_sound)
+
+# The pointer: the curve, poll-rate independence, nudges, the clamp (§9.3).
+add_executable(test_pointer test_pointer.c ${PROJECT_SOURCE_DIR}/picocalc/pointer.c)
+target_include_directories(test_pointer PRIVATE ${PROJECT_SOURCE_DIR}/picocalc)
+target_compile_definitions(test_pointer PRIVATE PICOCALC_QUEST_HOST=1)
+target_compile_options(test_pointer PRIVATE ${PICOCALC_QUEST_WARNINGS})
+add_test(NAME test_pointer COMMAND test_pointer)
+
+# scripts/sof_to_sou.py: a FLAC speech file back to the .sou the firmware
+# plays, byte for byte on a made-up one; a skip without the flac command.
+find_package(Python3 COMPONENTS Interpreter)
+if (Python3_FOUND)
+    add_test(NAME test_sof_to_sou
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_sof_to_sou.py)
+    set_tests_properties(test_sof_to_sou PROPERTIES SKIP_RETURN_CODE 77)
+endif()

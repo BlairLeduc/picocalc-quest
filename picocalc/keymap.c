@@ -26,6 +26,7 @@ static const char s_unshifted[] = "`=-\\/.;',[] ";
 
 const km_chord_t keymap_chords[] = {
     { KM_MOD_CTRL | KM_MOD_ALT, MCU_DEL, "quit the game to the selector (upstream's, D9)" },
+    { KM_MOD_ALT, 'm', "pointer or keys mode for the arrows (§9.3)" },
 };
 const unsigned keymap_chord_count = sizeof keymap_chords / sizeof keymap_chords[0];
 
@@ -135,7 +136,7 @@ km_result_t keymap_feed(keymap_t *km, uint8_t state, uint8_t code, km_event_t *o
     if (state == MCU_RELEASED) {
         if (!h->down) return KM_STRAY;
         h->down = false;
-        *out = (km_event_t){ false, false, h->keycode, h->ascii, h->flags };
+        *out = (km_event_t){ false, false, h->keycode, h->ascii, h->flags, phys };
         return KM_EVENT;
     }
 
@@ -144,7 +145,7 @@ km_result_t keymap_feed(keymap_t *km, uint8_t state, uint8_t code, km_event_t *o
          * holds for the keys that are not text (§6.2). Modifiers send
          * holds as long as they are down; the engine wants one down. */
         if (is_modifier(phys)) return KM_CONSUMED;
-        *out = (km_event_t){ true, true, h->keycode, h->ascii, h->flags };
+        *out = (km_event_t){ true, true, h->keycode, h->ascii, h->flags, phys };
         return KM_EVENT;
     }
 
@@ -153,6 +154,6 @@ km_result_t keymap_feed(keymap_t *km, uint8_t state, uint8_t code, km_event_t *o
     h->down = true;
     h->flags = keymap_mods(km);
     translate(code, h->flags, &h->keycode, &h->ascii);
-    *out = (km_event_t){ true, false, h->keycode, h->ascii, h->flags };
+    *out = (km_event_t){ true, false, h->keycode, h->ascii, h->flags, phys };
     return KM_EVENT;
 }

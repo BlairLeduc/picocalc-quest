@@ -648,7 +648,15 @@
 +}
 --- a/src/frank_quest_main.cpp
 +++ b/src/frank_quest_main.cpp
-@@ -29,6 +29,8 @@
+@@ -15,6 +15,7 @@
+ #include "backends/platform/rp2350/rp2350-minimal.h"
+ #include "frank_quest_fs.h"
+ #include "frank_quest_selector.h"
++#include "picocalc_input.h"
+ 
+ extern "C" {
+ #include "psram_allocator.h"
+@@ -29,6 +30,8 @@
  #include "engines/advancedDetector.h"
  #include "base/plugins.h"
  #include "common/fs.h"
@@ -657,7 +665,7 @@
  #include "common/archive.h"
  
  // GOB Engine includes
-@@ -257,6 +259,120 @@
+@@ -257,6 +260,120 @@
  
  // GOB (Gobliins) game launcher with explicit version
  // Returns true if a game was found and launched
@@ -778,7 +786,7 @@
  static bool launchGOBGameWithVersion(const char *gamePath, int gobVersion) {
      printf("GOB: Launching game from %s as Gobliiins %d\n", gamePath, gobVersion);
  
-@@ -289,7 +405,8 @@
+@@ -289,7 +406,8 @@
      // GOB-specific settings
      ConfMan.setBool("copy_protection", false);  // Skip copy protection
      ConfMan.set("language", "en");
@@ -788,7 +796,7 @@
  
      // Graphics settings
      ConfMan.set("gfx_mode", "normal");
-@@ -326,7 +443,13 @@
+@@ -326,7 +444,13 @@
      memset(&gameDesc, 0, sizeof(gameDesc));
  
      // Set up the ADGameDescription part based on detected version
@@ -803,7 +811,7 @@
          gameDesc.desc.gameid = "gob3";
          gameDesc.desc.extra = "VGA";
          gameDesc.gameType = Gob::kGameTypeGob3;
-@@ -346,13 +469,15 @@
+@@ -346,13 +470,15 @@
          printf("GOB: Configuring for Gobliiins 1 (EGA)\n");
      }
  
@@ -826,7 +834,7 @@
  
      printf("GOB: Creating engine instance...\n");
  
-@@ -378,9 +503,15 @@
+@@ -378,9 +504,15 @@
  static bool launchAGIGame(const char *gamePath) {
      printf("AGI: Attempting to launch game from %s\n", gamePath);
  
@@ -843,7 +851,7 @@
  
      // Set default audio/config values that Engine::syncSoundSettings() expects
      ConfMan.setInt("music_volume", 192);
-@@ -614,20 +745,30 @@
+@@ -614,20 +746,30 @@
      static KYRAGameDescription gameDesc;
      memset(&gameDesc, 0, sizeof(gameDesc));
  
@@ -887,7 +895,7 @@
  
      printf("KYRA: Creating engine...\n");
      ::Engine *engine = (gameId == 1)
-@@ -763,12 +904,16 @@
+@@ -763,12 +905,16 @@
  
      static ADGameDescription gameDesc;
      memset(&gameDesc, 0, sizeof(gameDesc));
@@ -910,7 +918,7 @@
  
      ConfMan.set("gameid", gameDesc.gameid);
  
-@@ -1028,6 +1173,9 @@
+@@ -1028,6 +1174,9 @@
      ConfMan.registerDefault("language",                        "en");
      ConfMan.registerDefault("gfx_mode",                        "normal");
      ConfMan.registerDefault("render_mode",                     "");
@@ -920,6 +928,23 @@
  }
  
  // Dispatch a QuestGame to the engine launcher it belongs to. Returns
+@@ -1164,11 +1313,16 @@
+         // selector frame and the device looks frozen.
+         frank_quest_show_loading(g);
+ 
++        // picocalc-quest: the arrows start as the pointer or as arrow
++        // keys, as the engine's games expect (design.md §9.3), and are
++        // the selector's again after.
++        picocalc_input_game((int)g.engine);
+         if (dispatchGame(g)) {
+             printf("FRANK Quest: game completed cleanly.\n");
+         } else {
+             printf("FRANK Quest: game dispatch failed.\n");
+         }
++        picocalc_input_game(PICOCALC_ENGINE_NONE);
+ 
+         // Engine has returned — either naturally (ChainGamesMan empty,
+         // game finished) or via Ctrl+Alt+Del → EVENT_QUIT. Tear down
 --- a/src/frank_quest_selector.cpp
 +++ b/src/frank_quest_selector.cpp
 @@ -72,6 +72,17 @@

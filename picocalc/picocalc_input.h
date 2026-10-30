@@ -21,6 +21,24 @@ extern "C" {
  * CABAL_MOD_*. Returns 1 with an event, 0 without. */
 int picocalc_input_key(int *pressed, int *keycode, int *ascii, int *flags);
 
+/* The engines, as upstream's QuestEngine numbers them
+ * (frank_quest_selector.h), and none for the selector. */
+#define PICOCALC_ENGINE_NONE  0
+#define PICOCALC_ENGINE_SCUMM 1
+#define PICOCALC_ENGINE_SCI   2
+#define PICOCALC_ENGINE_KYRA  3
+#define PICOCALC_ENGINE_GOB   4
+#define PICOCALC_ENGINE_AGI   5
+
+/* Core 0, before a game starts and after it ends: the arrows' mode for
+ * that engine (§9.3), shown in the status band; with NONE, every key
+ * goes to the selector. */
+void picocalc_input_game(int engine);
+
+/* The longest from an arrow's read by core 1 to the pointer's first
+ * motion given to the engine, since boot (§16 M6). */
+extern volatile uint32_t g_pointer_latency_max_us;
+
 /* For the heartbeat (§14.3), written by core 0: events taken from the
  * ring, the sum and the longest of their waits from core 1's read of
  * the MCU's FIFO to the engine's poll, and the MCU's events the key map
