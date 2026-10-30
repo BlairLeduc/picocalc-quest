@@ -1303,7 +1303,8 @@ the exit key to the shell's first screen.
 **Done** 2026-10-30 (`milestones.md`). A save loaded after a power cycle
 in every engine; Esc powered off, and from the shell went back to it (on
 a Plus 2); a save made from the shell carried the local date in KQ1's list
-and on the card. Saves written in 49–951 ms. Found on the way: upstream's
+and on the card. Saves written in 49–951 ms; Esc to the shell's first
+screen just over 2 s, 2 s of it the exit page. Found on the way: upstream's
 one config domain per engine let games overwrite each other's saves, SCI
 and AGI saved to one slot through a stubbed chooser (§10.2), F6–F10
 reached the engine with Shift held (§9.2), and an engine's warp of the

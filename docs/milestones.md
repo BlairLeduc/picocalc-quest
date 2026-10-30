@@ -55,7 +55,10 @@ the way, two of them upstream's.
 - **From the shell** (the Plus 2): Esc went back to the shell; a King's
   Quest I save showed the shell's local date and time in the game's list,
   and the file's time on the card was right. With the exit page held
-  2 s, the owner could read it.
+  2 s, the owner could read it. With the card taken out at the selector,
+  Esc powered off instead, there being no shell to load.
+- **The release build** on the Plus 2, started from the shell: the same
+  exits, by the owner.
 - **Without the shell**: the save files on the card read 31 December 2021,
   11 pm on a Mac, which is FatFs's 1 January 2022 00:00 shifted an hour
   by macOS's daylight-saving handling of FAT times (not read raw).
@@ -70,6 +73,9 @@ close, so the engine's time as well as the card's:
 | King's Quest I | `quest-kq1.001` | 44,099 B | 473 ms |
 | Kyrandia | `quest-kyr1.000`, `.001` | 51,489 B, 51,502 B | 221, 184 ms |
 | Gobliins 2 | `quest-gob2.s00` | 19,285 B | 49 ms |
+
+From Esc to the shell's first screen, release build on the Plus 2, by the
+owner's watch: **just over 2 s**, of which 2 s is the exit page.
 
 **Found:**
 - **Saves overwrote each other** across the games of an engine, upstream's
@@ -91,12 +97,11 @@ close, so the engine's time as well as the card's:
   and powers off when it is written: in the hardware notes.
 
 **Not checked:** the banner's time against the shell's on a launch from
-the shell (no UART on the Plus 2); the time from Esc to the shell's first
-screen; the fallback date in a game's save
+the shell (no UART on the Plus 2); the fallback date in a game's save
 list; Day of the Tentacle's save time (made before a capture was running);
 Esc with neither way out; a card taken out during a game, since the fix;
 the button, mode and volume settings by the owner; the release build on
-the board.
+the Plus 2 W.
 
 **M6 (pointer and full input) is done**, on 2026-10-30, on the same
 Pimoroni Pico Plus 2 W in a PicoCalc, flashed over SWD, with Arm GCC
