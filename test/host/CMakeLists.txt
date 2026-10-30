@@ -10,7 +10,7 @@ foreach(mode synthetic repo)
     set_tests_properties(test_patch_roundtrip_${mode} PROPERTIES SKIP_RETURN_CODE 77)
 endforeach()
 
-# The shell's time to calendar fields (§13.2).
+# The shell's time to calendar fields, and FAT's time stamp (§13.2).
 add_executable(test_clock test_clock.c ${PROJECT_SOURCE_DIR}/picocalc/clock.c)
 target_include_directories(test_clock PRIVATE ${PROJECT_SOURCE_DIR}/picocalc)
 target_compile_definitions(test_clock PRIVATE PICOCALC_QUEST_HOST=1)
@@ -45,6 +45,13 @@ target_include_directories(test_pointer PRIVATE ${PROJECT_SOURCE_DIR}/picocalc)
 target_compile_definitions(test_pointer PRIVATE PICOCALC_QUEST_HOST=1)
 target_compile_options(test_pointer PRIVATE ${PICOCALC_QUEST_WARNINGS})
 add_test(NAME test_pointer COMMAND test_pointer)
+
+# The settings file: every key, bad lines named and the rest applied (§10.3).
+add_executable(test_settings test_settings.c ${PROJECT_SOURCE_DIR}/picocalc/settings.c)
+target_include_directories(test_settings PRIVATE ${PROJECT_SOURCE_DIR}/picocalc)
+target_compile_definitions(test_settings PRIVATE PICOCALC_QUEST_HOST=1)
+target_compile_options(test_settings PRIVATE ${PICOCALC_QUEST_WARNINGS})
+add_test(NAME test_settings COMMAND test_settings)
 
 # scripts/sof_to_sou.py: a FLAC speech file back to the .sou the firmware
 # plays, byte for byte on a made-up one; a skip without the flac command.

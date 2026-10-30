@@ -3,7 +3,8 @@
  * clock_civil against an independent model that walks the calendar a day
  * at a time from 1900 to 2200, then a table of instants: offsets either
  * side of UTC and across midnight, month ends, leap years including 2000
- * and 2100, before 1970, and the fallback.
+ * and 2100, before 1970, and the fallback. Then the FAT time stamp, each
+ * field read back out of the packed word, and both ends of FAT's range.
  */
 
 #include <stdio.h>
@@ -60,6 +61,37 @@ static void sweep(void) {
     }
 }
 
+/* A FAT time stamp, unpacked by hand. */
+static void expect_fat(const char *what, uint32_t got, int year, int mon, int mday, int hour,
+                       int min, int sec) {
+    int gy = (int)(got >> 25) + 1980, gm = (int)(got >> 21 & 15u), gd = (int)(got >> 16 & 31u);
+    int gh = (int)(got >> 11 & 31u), gmin = (int)(got >> 5 & 63u), gs = (int)(got & 31u) * 2;
+    if (gy == year && gm == mon && gd == mday && gh == hour && gmin == min && gs == sec) return;
+    failures++;
+    fprintf(stderr, "FAIL %s: got %04d-%02d-%02d %02d:%02d:%02d, "
+                    "want %04d-%02d-%02d %02d:%02d:%02d\n",
+            what, gy, gm, gd, gh, gmin, gs, year, mon, mday, hour, min, sec);
+}
+
+static void fat(void) {
+    clock_tm_t t;
+    clock_local(1793284215000LL, -240, &t);
+    expect_fat("FAT, 2026-10-29 10:30:15", clock_fattime(&t), 2026, 10, 29, 10, 30, 14);
+    clock_civil(4102444799LL, &t);
+    expect_fat("FAT, the end of 2099", clock_fattime(&t), 2099, 12, 31, 23, 59, 58);
+    clock_civil(315532800, &t);
+    expect_fat("FAT, its first second", clock_fattime(&t), 1980, 1, 1, 0, 0, 0);
+    clock_civil(315532799, &t);
+    expect_fat("FAT, before 1980", clock_fattime(&t), 1980, 1, 1, 0, 0, 0);
+    clock_civil(0, &t);
+    expect_fat("FAT, the epoch", clock_fattime(&t), 1980, 1, 1, 0, 0, 0);
+    /* 2107-12-31 23:59:59 UTC is 4354819199 s. */
+    clock_civil(4354819199LL, &t);
+    expect_fat("FAT, its last second", clock_fattime(&t), 2107, 12, 31, 23, 59, 58);
+    clock_civil(4354819200LL, &t);
+    expect_fat("FAT, after 2107", clock_fattime(&t), 2107, 12, 31, 23, 59, 58);
+}
+
 int main(void) {
     sweep();
 
@@ -104,6 +136,8 @@ int main(void) {
     expect("the fallback at boot", &t, 2025, 1, 1, 0, 0, 0, 3);
     clock_fallback(90061999u, &t);
     expect("the fallback a day on", &t, 2025, 1, 2, 1, 1, 1, 4);
+
+    fat();
 
     if (failures) {
         fprintf(stderr, "%d failure(s)\n", failures);

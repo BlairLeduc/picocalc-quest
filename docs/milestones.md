@@ -4,6 +4,99 @@ What each milestone verified, on which board, on what date, and what was
 not checked, newest first. `design.md` §16 holds each milestone's scope
 and done-when criteria; this file keeps the full record.
 
+**M7 (saves, settings, quit and exit) is done**, on 2026-10-30, on the
+same Pimoroni Pico Plus 2 W in a PicoCalc, flashed over SWD, and on a
+Pimoroni Pico Plus 2 started from the PicoCalc shell under UF2 Loader,
+with Arm GCC 15.2.Rel1 and SDK 2.3.1, development build. The owner saved
+and loaded in every engine across a power cycle, left by Esc both ways,
+and saw the shell's local time on a save. Four faults found and fixed on
+the way, two of them upstream's.
+
+- **Saves** (`frank_quest_main.cpp`, §10.2): every game under its own
+  config domain, `quest-<folder>`. Engines name save files after the
+  domain, and upstream's one domain per engine gave every SCUMM game the
+  same `quest-scumm.s01`. SCI and AGI now use the games' own save and
+  restore screens: ScummVM's chooser, which they called, is upstream's
+  stub that always returns slot 0.
+- **Settings** (`picocalc/settings.c`, §10.3): `/quest/picocalc.ini`, the
+  two button keys, pointer speed, volume and each engine's starting mode,
+  every default in one function. Bad lines are logged with number, text
+  and why; the first is named in the status band for 10 s.
+- **The date and time** (§13.2): the patched `getTimeAndDate()`, and
+  `get_fattime()` in `clock.c` with the driver's compiled out
+  (`SDCARD_EXTERNAL_FATTIME`). Upstream's gave 0, no date at all.
+- **Exit** (`picocalc/exit.c`, §13.3): Esc in the selector, which the
+  legend labels; unmount, then the shell after 2 s on a page, or the
+  southbridge's power off after 6 s. The banner says whether the
+  southbridge can power off and which way Esc goes.
+- **A card taken out during a game** (found in M6): the no-card page when
+  the selector next opens, or a restart if it was put back.
+- **The patch** (still ten files): the domains and save screens, the time,
+  the selector's Esc and legend, and the warp (below).
+- **Host:** `test_settings`: every key good and bad, comments, case, CRLF,
+  a BOM, a bad line named with the rest applied, a bad value leaving its
+  setting alone, the buttons on one key, more bad lines than room, the
+  gain. A planted fault (the later of two clashing buttons) failed it.
+  `test_clock` adds FAT's time stamp, both ends of its range.
+  `test_keymap` checks the alternates arrive without their modifier.
+
+**Checked on the board** (UART logs `out/m7-*.log`, not committed):
+
+- **Saved, switched off and on, and loaded**, by the owner: Day of the
+  Tentacle (Alt+1, then Ctrl+1); Space Quest III (its menu, F5 and F7);
+  Space Quest IV (the control panel); King's Quest I (F5, F7); Kyrandia
+  (its Options); Gobliins 2 (its menu). Gobliiins has no saves.
+- **The settings**: a file with `volme = 3` on line 5 booted with "line 5
+  not used, no such setting" in the log and the band, and the log's
+  summary showed the other lines applied (pointer speed 150 %, volume
+  80 %, AGI in pointer mode).
+- **Esc, installed over SWD**: "power off in 6 s, asked for 5 ms after
+  the key", and the PicoCalc switched itself off.
+- **From the shell** (the Plus 2): Esc went back to the shell; a King's
+  Quest I save showed the shell's local date and time in the game's list,
+  and the file's time on the card was right.
+- **Without the shell**: the save files on the card read 31 December 2021,
+  11 pm on a Mac, which is FatFs's 1 January 2022 00:00 shifted an hour
+  by macOS's daylight-saving handling of FAT times (not read raw).
+
+**Measured** (development build), from the open of each save file to its
+close, so the engine's time as well as the card's:
+
+| Title | Save file | Size | Time |
+|---|---|---:|---:|
+| Space Quest III | `quest-sq3.000` | 70,526 B | 286 ms |
+| Space Quest IV | `quest-sq4.000` | 84,859 B | 951 ms |
+| King's Quest I | `quest-kq1.001` | 44,099 B | 473 ms |
+| Kyrandia | `quest-kyr1.000`, `.001` | 51,489 B, 51,502 B | 221, 184 ms |
+| Gobliins 2 | `quest-gob2.s00` | 19,285 B | 49 ms |
+
+**Found:**
+- **Saves overwrote each other** across the games of an engine, upstream's
+  one config domain per engine; fixed as above. Saves made under
+  upstream's names are no longer listed.
+- **SCI and AGI saved to one slot**, through upstream's stubbed chooser;
+  fixed with the games' own screens.
+- **F7 did nothing in Space Quest III**: F6–F10, reached with Shift, came
+  with Shift held, and SCI took Shift+F7 for another key. Every key the
+  PicoCalc has only as an alternate now comes without the modifier that
+  reaches it (§9.2).
+- **The pointer went back after a game moved it**: upstream's
+  `warpMouse()` moved only the cursor drawn, and the next arrow moved on
+  from the old place. Both move now (§9.3).
+- The exit page went by too fast to read; now 2 s, at the owner's ask.
+- Upstream writes a 651-byte `scummvm.ini` at the card's root on each
+  return to the selector.
+- The southbridge (version 0) answers a read of `OFF` with a value not 0
+  and powers off when it is written: in the hardware notes.
+
+**Not checked:** the banner's time against the shell's on a launch from
+the shell (no UART on the Plus 2); the time from Esc to the shell's first
+screen; the 2 s exit page on the board; the fallback date in a game's save
+list; Day of the Tentacle's save time (made before a capture was running);
+Esc with neither way out; a card taken out during a game, since the fix;
+the button, mode and volume settings by the owner; the release build on
+the board.
+
 **M6 (pointer and full input) is done**, on 2026-10-30, on the same
 Pimoroni Pico Plus 2 W in a PicoCalc, flashed over SWD, with Arm GCC
 15.2.Rel1 and SDK 2.3.1, development build. The owner played the first

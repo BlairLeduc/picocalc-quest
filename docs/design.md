@@ -263,13 +263,13 @@ The expected patch, to be confirmed at M0:
 
 | File | Change |
 |---|---|
-| `src/backends/platform/rp2350/rp2350-minimal.cpp` | `cabal_poll_event()` takes its key events from the PicoCalc input layer (§9; done in M3, keys only: the mouse block stays, fed nothing, until M6). Its PS/2 path cannot be shimmed honestly: it gets F-keys as private ASCII bytes that never become `CABAL_KEY_F*`, and it wants mouse deltas. `cabal_system_init()` loses the PS/2 mouse start-up (M3). |
+| `src/backends/platform/rp2350/rp2350-minimal.cpp` | `cabal_poll_event()` takes its key events from the PicoCalc input layer (§9; done in M3, keys only: the mouse block stays, fed nothing, until M6). Its PS/2 path cannot be shimmed honestly: it gets F-keys as private ASCII bytes that never become `CABAL_KEY_F*`, and it wants mouse deltas. `cabal_system_init()` loses the PS/2 mouse start-up (M3). `picocalc_warp_mouse()` sets the poll's place for an engine's warp (§9.3; M7). |
 | `src/board_config.h` | M1/M2 layouts replaced by one PicoCalc block. |
 | `drivers/sdcard/sdcard.c` | `CLK_FAST` made overridable, set to 25 MHz (§10). Its `get_fattime()` (always 0) compiled out in favour of the PicoCalc one (§13.2). |
-| `src/backends/platform/rp2350/rp2350-system.cpp` | `updateScreen()` copies and publishes a frame only when something shown has changed, and hands its own surface to `cabal_update_screen()` in place of a second copy (§7.2; M4). `logMessage()` passes an error's message to the error page (§13.1; M4). `initBackend()` creates the mixer at the audio shim's rate, not a literal 44,100 Hz (§8.2; M5, found in M0); `lockMutex()` masks the audio IRQ by one depth count, with barriers, and does nothing inside the IRQ (§8.2; found in M5). To come: `getTimeAndDate()` asks the PicoCalc clock (§13.2, M7), keeping upstream's made-up date as the fallback. |
-| `src/frank_quest_main.cpp` | The Gob, SCI and Kyra launchers look the folder's game up in the engine's own ScummVM table, by its files' MD5s and sizes, and launch with that entry; upstream fixes one version per game, whatever the files (§10.2; M4). Each AGI game gets its own config domain, so its own saves (M4). The OPL emulator is the build's, as upstream's `opl_driver` default (§8.3; M5). |
+| `src/backends/platform/rp2350/rp2350-system.cpp` | `updateScreen()` copies and publishes a frame only when something shown has changed, and hands its own surface to `cabal_update_screen()` in place of a second copy (§7.2; M4). `logMessage()` passes an error's message to the error page (§13.1; M4). `initBackend()` creates the mixer at the audio shim's rate, not a literal 44,100 Hz (§8.2; M5, found in M0); `lockMutex()` masks the audio IRQ by one depth count, with barriers, and does nothing inside the IRQ (§8.2; found in M5). `getTimeAndDate()` asks the PicoCalc clock, keeping upstream's made-up date as the fallback (§13.2; M7). `warpMouse()` moves the poll's place as well as the cursor (§9.3; found in M7). |
+| `src/frank_quest_main.cpp` | The Gob, SCI and Kyra launchers look the folder's game up in the engine's own ScummVM table, by its files' MD5s and sizes, and launch with that entry; upstream fixes one version per game, whatever the files (§10.2; M4). Every game gets its own config domain, `quest-<folder>`, so its own saves (AGI in M4, the rest in M7), and SCI and AGI use the games' own save screens (§10.2; M7). The OPL emulator is the build's, as upstream's `opl_driver` default (§8.3; M5). |
 | `src/backends/events/default/default-events.cpp` | No key repeats of the arrows and diagonals (§9.1; found in M5). |
-| `src/frank_quest_selector.cpp` | More AGI games by folder name (§10.2; M4). To come: text that names PS/2, mouse clicks or HDMI, with `src/frank_quest_welcome.cpp`. |
+| `src/frank_quest_selector.cpp` | More AGI games by folder name (§10.2; M4). Esc leaves, and the legend names where to (§13.3; M7). To come: text that names PS/2, mouse clicks or HDMI, with `src/frank_quest_welcome.cpp`. |
 | `src/engines/gob/detection/detection.cpp`, `src/engines/sci/detection.cpp`, `src/engines/kyra/detection.cpp` | A function returning the engine's ScummVM table, which is `static` (M4). |
 
 Each patched hunk carries a comment citing the section of this document
@@ -602,7 +602,11 @@ pointer state (§9.3) and returns `CabalEvent`s: key down and up with
 | Alt, Ctrl, Shift | `0xa1`, `0xa5`, `0xa2`/`0xa3` | Modifier flags on later keys; Ctrl and Alt also for the chords in §9.5 |
 
 F7–F9 arrive as `0x87`–`0x89`, as the MCU's source says (observed in M3,
-§17). Every key gives the engine the code and ASCII ScummVM's SDL backend
+§17). A key the PicoCalc has only as another's alternate (F6–F10, Home,
+End, PgUp, PgDn, Break, Insert) reaches the engine without the Shift, or
+for Alt+I's Insert the Alt, that reaches it: SCI took Shift+F7 for another
+key, so Space Quest III's restore did nothing (found in M7). Ctrl stays;
+shifted punctuation keeps its Shift, as SDL gives it. Every key gives the engine the code and ASCII ScummVM's SDL backend
 would: letters as their lower-case key code with the ASCII as typed,
 Ctrl+letter as the control character, F1–F10 with `ASCII_F1`… (315…), the
 arrows and editing keys with their key code as ASCII. Everything about a
@@ -643,9 +647,11 @@ from rest), and opposite arrows cancel. The curve is integrated from each
 key's read time, so the distance is the same at any poll rate: 320 px
 takes 1.58 s. The pointer (`pointer.c`, with a host test) gives deltas
 through `ps2_mouse_get_state()`, which upstream's poll already reads when
-no key is waiting; upstream keeps the absolute place, clamps it to the
-game surface, and takes an engine's warp, so the port needs no screen
-size. A delta is at most ±127, upstream's clamp; the rest comes on the
+no key is waiting; upstream keeps the absolute place and clamps it to
+the game surface, so the port needs no screen size. Upstream's warp moved
+only the cursor drawn, not the place motion is added to, so after a game
+put the pointer on a button the next arrow took it back to where it had
+been; the patched `warpMouse()` moves both (found in M7). A delta is at most ±127, upstream's clamp; the rest comes on the
 next poll. Upstream draws the cursor into the frame on core 0, so the
 presenter needs nothing for it.
 
@@ -656,8 +662,9 @@ engine's mode before each game and gives every key back to the selector
 after it (one hunk in `frank_quest_main.cpp`).
 
 D8 was settled in M6 by playing one title per engine on the device: the
-owner kept the buttons and the curve as proposed. A `/quest/picocalc.ini`
-setting can rebind them (§10.3, M7).
+owner kept the buttons and the curve as proposed. `/quest/picocalc.ini`
+can rebind the buttons, scale the curve, and change each engine's starting
+mode (§10.3, M7).
 
 ### 9.4 Typing
 
@@ -724,9 +731,22 @@ Upstream's, so a card works on both, with more AGI names (M4):
 Upstream knows one AGI folder, `agi`, run as a generic fan-made game. The
 port adds `kq1`, `kq2`, `kq3`, `sq1`, `sq2`, `lsl1` and `pq1` as AGI when
 the folder has `LOGDIR`, checked before SCI, which remade four of them
-under the same names; without `LOGDIR`, `kq1` and the rest stay SCI. Each
-AGI folder saves under its own config domain, `quest-<folder>` (`agi`
-keeps upstream's `quest-agi`).
+under the same names; without `LOGDIR`, `kq1` and the rest stay SCI.
+
+**Saves.** Engines name their save files after the config domain, and
+upstream gave each engine one domain, so every SCUMM game saved as
+`quest-scumm.s01` and one game's save overwrote another's, as did Kyra's
+two games and the Gob games. Every game now saves under its own domain,
+`quest-<folder>` (AGI in M4, the rest in M7; `agi` keeps upstream's
+`quest-agi`), with any character a domain may not have made `_`. Saves
+made under upstream's names are no longer listed. SCI and AGI use the
+games' own save and restore screens (`originalsaveload`): ScummVM's
+chooser, which they otherwise call, is upstream's stub that always picks
+slot 0, so every save went to one slot (found in M7). SCUMM saves with
+Alt+1…9 and loads with Ctrl+1…9, since its menu is ScummVM's GUI, which
+the build leaves out; Kyra and the Gob games have their own menus;
+Gobliiins has no saves, only level codes. Upstream also writes a 651-byte
+`scummvm.ini` at the card's root on each return to the selector.
 
 Upstream also launched each Gob, SCI and Kyra game as one fixed version: a
 CD release ran as the floppy, and showed wrong colours (Gobliiins, EGA),
@@ -744,9 +764,29 @@ already.
 ### 10.3 Settings
 
 A `key = value` text file, read at boot on core 0 before the engine starts,
-with every default in one function (EL §8.7). Planned keys: the two button
-keys, pointer speed, per-engine starting mode, volume. It is written only
-by the user in v1; a menu that saves it is deferred (§19).
+with every default in one function (EL §8.7), `picocalc/settings.c`:
+
+```
+left_button   = ]        one printable key; a letter in any case
+right_button  = [
+pointer_speed = 100      per cent of the curve of §9.3, 25-400
+volume        = 100      per cent of the mixer's level, 0-200
+agi_mode      = keys     what the arrows start as: pointer or keys
+sci_mode      = pointer
+scumm_mode    = pointer
+kyra_mode     = pointer
+gob_mode      = pointer
+```
+
+Keys and words are in any case; blank lines and lines starting `#` or `;`
+are comments, as is the rest of a value from a `#` or `;` after a space
+(a value's first character never is, so `left_button = #` is the `#`
+key). A key given twice takes the later value. A line that cannot be used
+is logged with its number, text and why, and the first is named in the
+status band for 10 s when the selector first shows; the rest of the file
+applies, and a bad value leaves its setting alone. Both buttons on one key
+drop the later line. The file is read up to 4 KB. It is written only by
+the user in v1; a menu that saves it is deferred (§19).
 
 ---
 
@@ -925,7 +965,8 @@ Two callers:
   GOB scripts that read the date.
 - `get_fattime()`, replacing the SD driver's (§5.3): save files and
   anything else written to the card carry the real date and time; with no
-  clock set, FatFs's fixed default.
+  clock set, FatFs's fixed default, 1 January 2022. Upstream's returned
+  0, which is no date at all.
 
 What the port must **not** do, by the header's contract: stop the timer,
 change its tick source, set it other than through
@@ -961,6 +1002,20 @@ Before either: nothing may be left half-written on the card, since the
 reboot does not wait. At the selector the engine has been torn down and
 its files closed by upstream's `cabal_fs_session_reset()`; the exit path
 also unmounts FatFs, which flushes it.
+
+`picocalc/exit.c` does it (M7). Whether the southbridge can power off is
+read at bring-up on core 1, as Rogue does (a read of `OFF` not 0), and the
+banner says so. To the shell: unmount, the page "Back to the shell." for
+2 s (the owner's ask), core 1 parked, then `picocalc_shell_exit()`.
+Power off: core 1 writes `OFF` with 6 s, the least, between keyboard
+transactions; only if the southbridge takes it is the card unmounted and
+"Switching off." shown, so a refusal leaves the selector working. With
+neither way out, Esc says so in the status band and the legend keeps
+upstream's "CTRL+ALT+DEL: Reset". Esc works with an empty list too.
+
+A card taken out during a game is found when the selector next opens
+(found in M6): with no card, the no-card page; with one put back, the
+program starts again, since FatFs's mount is of the card that left.
 
 Quitting a game always returns to the selector (Ctrl+Alt+Del, or the
 game's own quit), through upstream's tear-down, which frees the whole
@@ -1245,6 +1300,15 @@ selector returns to the shell when started by it, and powers off when
 installed from BOOTSEL. **Measured**: save write time per engine; time from
 the exit key to the shell's first screen.
 
+**Done** 2026-10-30 (`milestones.md`). A save loaded after a power cycle
+in every engine; Esc powered off, and from the shell went back to it (on
+a Plus 2); a save made from the shell carried the local date in KQ1's list
+and on the card. Saves written in 49–951 ms. Found on the way: upstream's
+one config domain per engine let games overwrite each other's saves, SCI
+and AGI saved to one slot through a stubbed chooser (§10.2), F6–F10
+reached the engine with Shift held (§9.2), and an engine's warp of the
+pointer was undone by the next arrow (§9.3).
+
 ### M8: Performance pass and soak
 
 In measured steps, each against a control build in the same sitting
@@ -1308,7 +1372,7 @@ Every value the port depends on that has not been checked on this hardware
 | PSRAM frame read cost | hidden behind the wire; 6 % of core 0 by DMA | measured, M2 (§7.3) | high | Confirmed 2026-10-29; M8 measures under engines |
 | UF2 Loader's app partition holds 3.6 MB | yes | not checked | low | M9 |
 | POWMAN timer unaffected by the move to 300 MHz | yes | read either side of the switch, M1 | high | Confirmed 2026-10-29 |
-| Shell's clock record survives into the port and reads correctly | yes | read at boot, M1, after a reset over SWD | high | Confirmed 2026-10-29; a launch from the shell checked in M7 |
+| Shell's clock record survives into the port and reads correctly | yes | read at boot, M1, after a reset over SWD; a launch from the shell gave a save the shell's local time, M7 | high | Confirmed 2026-10-30 |
 | Upstream's SRAM use leaves room for the port | yes; 342,920 bytes left | measured, M0 build | high | Confirmed 2026-10-29 |
 | Core 1 stack of 2 KB is enough | yes; 724 bytes used | painted stack, M2, M3 | high | Confirmed 2026-10-29; watched in the heartbeat |
 
@@ -1360,5 +1424,6 @@ Every value the port depends on that has not been checked on this hardware
   The owner deferred it; it would take a track-file player and a decoder.
 - **Full Throttle's iMUSE mutex across card reads** and **a SMUSH picture
   fault** at a scene change (both found in M5). M8, by the owner's choice.
-- **SCI games share one config domain**, `quest-sci`, so one SCI game's
-  saves can overwrite another's (found in M4; AGI's are fixed). M7.
+- **A save and load menu for SCUMM.** Its menu is ScummVM's GUI, which
+  the build leaves out; Alt+1…9 and Ctrl+1…9 save and load, with no list
+  and no names. If quick saves prove too little.

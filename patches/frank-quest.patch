@@ -86,14 +86,36 @@
  
  #ifdef USB_HID_ENABLED
      printf("  Initializing USB HID keyboard...\n");
-@@ -680,57 +672,19 @@
-     static uint32_t motion_events_this_second = 0;
+@@ -476,6 +468,22 @@
+ }
+ 
+ void cabal_set_mouse_pos(int x, int y) {
++    g_state.cursorX = x;
++    g_state.cursorY = y;
++}
++
++// PicoCalc: an engine's warp moves the place mouse motion is added to as
++// well as the cursor drawn, or the next motion starts from where the
++// pointer was before the warp (picocalc-quest design.md §9.3; found in
++// M7). Not cabal_set_mouse_pos(), which each frame calls with the
++// engine's place and would undo motion it has not yet read.
++extern "C" void picocalc_warp_mouse(int x, int y) {
++    if (x < 0) x = 0;
++    if (x >= g_state.screenWidth) x = g_state.screenWidth - 1;
++    if (y < 0) y = 0;
++    if (y >= g_state.screenHeight) y = g_state.screenHeight - 1;
++    g_state.mouseX = x;
++    g_state.mouseY = y;
+     g_state.cursorX = x;
+     g_state.cursorY = y;
+ }
+@@ -681,56 +689,18 @@
      static uint32_t last_fps_report = 0;
      uint32_t start = time_us_32();
--
+ 
 -    // Poll keyboard
 -    ps2kbd_tick();
- 
+-
 -    // Check for keyboard events. Use the extended API so we get the
 -    // raw HID code alongside the ASCII byte — we need the HID code for
 -    // Ctrl+Alt+Del detection (modifier keys and Del don't land in the
@@ -104,7 +126,14 @@
 -    if (ps2kbd_get_key_ext(&pressed, &ascii_byte, &hid_code)) {
 -        // Ctrl+Alt+Del → reboot to selector. Never returns on match.
 -        fq_check_ctrl_alt_del(hid_code, pressed);
--
++    // picocalc-quest: the PicoCalc's keys, already in ScummVM's codes
++    // with their ASCII and modifiers (picocalc/keymap.c; design.md §9.2).
++    // Ctrl and Alt arrive as LCTRL and LALT, Del as DELETE, so the
++    // Ctrl+Alt+Del detector above works on them unchanged (§9.5).
++    int pressed, keycode, ascii, flags;
++    if (picocalc_input_key(&pressed, &keycode, &ascii, &flags)) {
++        fq_check_ctrl_alt_del(keycode, pressed);
+ 
 -        // ps2kbd_wrapper.cpp maps special keys to custom ASCII bytes
 -        // (arrows→0x80..0x83, F-keys→0xF1..0xFC, Delete→0). Those
 -        // values don't round-trip through OSystem_RP2350::convertKeyCode,
@@ -125,14 +154,7 @@
 -        case 0x4C: keycode = CABAL_KEY_DELETE; break;
 -        default:                               break;
 -        }
-+    // picocalc-quest: the PicoCalc's keys, already in ScummVM's codes
-+    // with their ASCII and modifiers (picocalc/keymap.c; design.md §9.2).
-+    // Ctrl and Alt arrive as LCTRL and LALT, Del as DELETE, so the
-+    // Ctrl+Alt+Del detector above works on them unchanged (§9.5).
-+    int pressed, keycode, ascii, flags;
-+    if (picocalc_input_key(&pressed, &keycode, &ascii, &flags)) {
-+        fq_check_ctrl_alt_del(keycode, pressed);
- 
+-
          event->type = pressed ? CABAL_EVENT_KEYDOWN : CABAL_EVENT_KEYUP;
          event->kbd.keycode = keycode;
 -
@@ -166,10 +188,13 @@
  // Audio callback function called from C audio driver
  #ifdef USE_I2S_AUDIO
  extern "C" void cabal_audio_set_mixer_callback(void (*callback)(uint8_t *stream, int len));
-@@ -46,6 +50,33 @@
- }
- #endif
- 
+@@ -43,6 +47,35 @@
+ 	if (g_mixer) {
+ 		g_mixer->mixCallback(stream, len);
+ 	}
++}
++#endif
++
 +// PicoCalc: updateScreen() copies and publishes a frame only when
 +// something it shows has changed since the last one (picocalc-quest
 +// design.md §7.2): anything that writes the screen or the overlay, the
@@ -181,6 +206,8 @@
 +static bool s_shownMouseVisible = false;
 +
 +extern "C" void picocalc_fatal_message(const char *message);
++
++#include "clock.h"
 +
 +#if PICOCALC_QUEST_SCREEN_CHECK
 +// The diagnostic build's check that the skip misses nothing: the shown
@@ -194,13 +221,10 @@
 +	for (int i = 0, n = s.getPitch() * s.getHeight() / 4; i < n; i++)
 +		sum = (sum << 5 | sum >> 27) ^ p[i];
 +	return sum;
-+}
-+#endif
-+
- // Graphics mode
- static const OSystem::GraphicsMode s_supportedGraphicsModes[] = {
- 	{"1x", "Normal", 1},
-@@ -61,6 +92,7 @@
+ }
+ #endif
+ 
+@@ -61,6 +94,7 @@
  
  	memset(&_cursor, 0, sizeof(_cursor));
  	memset(_palette, 0, sizeof(_palette));
@@ -208,7 +232,7 @@
  }
  
  OSystem_RP2350::~OSystem_RP2350() {
-@@ -136,8 +168,9 @@
+@@ -136,8 +170,9 @@
  	// Record start time
  	_startTime = cabal_get_millis();
  
@@ -220,7 +244,7 @@
  	_mixer->setReady(true);
  	g_mixer = _mixer;
  
-@@ -207,6 +240,7 @@
+@@ -207,6 +242,7 @@
  
  	// Create overlay surface (same size, 8bpp for simplicity)
  	_overlay.create(width, height, Graphics::PixelFormat::createFormatCLUT8());
@@ -228,7 +252,7 @@
  }
  
  int16 OSystem_RP2350::getHeight() {
-@@ -249,9 +283,12 @@
+@@ -249,9 +285,12 @@
  		src += pitch;
  		dst += dstPitch;
  	}
@@ -241,7 +265,7 @@
  	return &_screen;
  }
  
-@@ -263,31 +300,63 @@
+@@ -263,30 +302,62 @@
  	if (_screen.getPixels()) {
  		memset(_screen.getPixels(), col, _screen.getWidth() * _screen.getHeight());
  	}
@@ -259,6 +283,9 @@
 +		s_shownMouseX = _mouseX;
 +		s_shownMouseY = _mouseY;
 +		s_shownMouseVisible = _mouseVisible;
++
++		// Update palette if needed
++		updatePalette();
  
 -	// Copy to minimal backend
 -	CabalSurface *cabalScreen = cabal_lock_screen();
@@ -268,9 +295,6 @@
 -			src = (const byte *)_overlay.getPixels();
 -		} else {
 -			src = (const byte *)_screen.getPixels();
-+		// Update palette if needed
-+		updatePalette();
-+
 +		// PicoCalc: the minimal backend reads this surface directly for
 +		// the one frame, in place of a copy into its own (§7.2).
 +		CabalSurface *cabalScreen = cabal_lock_screen();
@@ -297,7 +321,7 @@
 -	cabal_update_screen();
 +		// Push to display
 +		cabal_update_screen();
- 
++
 +		if (cabalScreen) cabalScreen->pixels = own;
 +		cabal_unlock_screen();
 +#if PICOCALC_QUEST_SCREEN_CHECK
@@ -318,11 +342,10 @@
 +		}
 +#endif
 +	}
-+
+ 
  	// Drive the DefaultTimerManager — SCI's music/sound engine and
  	// several other subsystems register ~60 Hz callbacks here, and
- 	// without the pulse cutscenes and fades stall mid-sequence.
-@@ -308,11 +377,13 @@
+@@ -308,11 +379,13 @@
  
  void OSystem_RP2350::showOverlay() {
  	_overlayVisible = true;
@@ -336,7 +359,7 @@
  	cabal_hide_overlay();
  }
  
-@@ -325,6 +396,7 @@
+@@ -325,6 +398,7 @@
  		// Copy screen to overlay
  		memcpy(_overlay.getPixels(), _screen.getPixels(), _screenWidth * _screenHeight);
  	}
@@ -344,7 +367,7 @@
  }
  
  void OSystem_RP2350::grabOverlay(void *buf, int pitch) {
-@@ -352,6 +424,7 @@
+@@ -352,6 +426,7 @@
  		src += pitch;
  		dst += dstPitch;
  	}
@@ -352,7 +375,20 @@
  }
  
  int16 OSystem_RP2350::getOverlayHeight() {
-@@ -383,6 +456,15 @@
+@@ -374,15 +449,27 @@
+ 	return prev;
+ }
+ 
++extern "C" void picocalc_warp_mouse(int x, int y);
++
+ void OSystem_RP2350::warpMouse(int x, int y) {
+ 	_mouseX = x;
+ 	_mouseY = y;
+-	cabal_set_mouse_pos(x, y);
++	// PicoCalc: the poll's place too, not only the cursor drawn (§9.3).
++	picocalc_warp_mouse(x, y);
+ }
+ 
  void OSystem_RP2350::setMouseCursor(const void *buf, uint w, uint h, int hotspotX, int hotspotY,
                                      uint32 keycolor, bool dontScale,
                                      const Graphics::PixelFormat *format) {
@@ -368,7 +404,36 @@
  	if (_cursor.data) {
  		delete[] _cursor.data;
  	}
-@@ -534,39 +616,63 @@
+@@ -426,16 +513,18 @@
+ }
+ 
+ void OSystem_RP2350::getTimeAndDate(TimeDate &t) const {
+-	// No RTC on board; synthesize a monotonic wall-clock from boot time
+-	// so that games using mode-1/mode-2 kGetTime (wall-clock) see time advance.
+-	uint32 secs = cabal_get_millis() / 1000;
+-	t.tm_sec = secs % 60;
+-	t.tm_min = (secs / 60) % 60;
+-	t.tm_hour = (secs / 3600) % 24;
+-	t.tm_mday = 1;
+-	t.tm_mon = 0;
+-	t.tm_year = 125;  // 2025
+-	t.tm_wday = 0;
++	// PicoCalc: local time from the clock the shell keeps; without it,
++	// 1 January 2025 plus the uptime, as upstream's, so games that read
++	// the clock still see it advance (picocalc-quest design.md §13.2).
++	clock_tm_t c;
++	picocalc_clock_now(&c);
++	t.tm_sec = c.tm_sec;
++	t.tm_min = c.tm_min;
++	t.tm_hour = c.tm_hour;
++	t.tm_mday = c.tm_mday;
++	t.tm_mon = c.tm_mon;
++	t.tm_year = c.tm_year;
++	t.tm_wday = c.tm_wday;
+ }
+ 
+ extern "C" int frank_quest_cad_consume(void);
+@@ -534,39 +623,63 @@
  // else touches the shared state. HDMI runs on DMA_IRQ_0 and stays
  // enabled.
  //
@@ -444,7 +509,7 @@
  }
  
  // Audio
-@@ -587,4 +693,7 @@
+@@ -587,4 +700,7 @@
  
  void OSystem_RP2350::logMessage(LogMessageType::Type type, const char *message) {
  	printf("%s\n", message);
@@ -656,16 +721,39 @@
  
  extern "C" {
  #include "psram_allocator.h"
-@@ -29,6 +30,8 @@
+@@ -29,6 +30,9 @@
  #include "engines/advancedDetector.h"
  #include "base/plugins.h"
  #include "common/fs.h"
 +#include "common/file.h"
 +#include "common/md5.h"
++#include "common/util.h"
  #include "common/archive.h"
  
  // GOB Engine includes
-@@ -257,6 +260,120 @@
+@@ -233,6 +237,21 @@
+ 
+     printf("GOB Detection: No known files found\n");
+     return 0;  // Unknown
++}
++
++// PicoCalc: a config domain per game folder, quest-<folder>. Engines name
++// their save files after the domain, and upstream's one domain per engine
++// gave every SCUMM game the same quest-scumm.s01, so one game's save
++// overwrote another's (picocalc-quest design.md §10.2). /quest/agi keeps
++// upstream's quest-agi. A character a domain name may not have becomes _.
++// The path goes in the domain, so it is set after this.
++static void setGameDomain(const char *gamePath) {
++    const char *folder = strrchr(gamePath, '/');
++    Common::String domain = Common::String("quest-") + (folder ? folder + 1 : gamePath);
++    for (uint i = 0; i < domain.size(); i++)
++        if (!Common::isAlnum(domain[i]) && domain[i] != '-' && domain[i] != '_')
++            domain.setChar('_', i);
++    ConfMan.setActiveDomain(domain);
+ }
+ 
+ // Forward declaration
+@@ -257,12 +276,127 @@
  
  // GOB (Gobliins) game launcher with explicit version
  // Returns true if a game was found and launched
@@ -786,7 +874,15 @@
  static bool launchGOBGameWithVersion(const char *gamePath, int gobVersion) {
      printf("GOB: Launching game from %s as Gobliiins %d\n", gamePath, gobVersion);
  
-@@ -289,7 +406,8 @@
+     // Set up the game path in config manager
++    // PicoCalc: the game's own domain, before the path that goes in it.
++    setGameDomain(gamePath);
+     ConfMan.set("path", gamePath);
+-    ConfMan.setActiveDomain("quest-gob");
+ 
+     // Set default audio/config values that Engine::syncSoundSettings() expects
+     ConfMan.setInt("music_volume", 192);
+@@ -289,7 +423,8 @@
      // GOB-specific settings
      ConfMan.setBool("copy_protection", false);  // Skip copy protection
      ConfMan.set("language", "en");
@@ -796,7 +892,7 @@
  
      // Graphics settings
      ConfMan.set("gfx_mode", "normal");
-@@ -326,7 +444,13 @@
+@@ -326,7 +461,13 @@
      memset(&gameDesc, 0, sizeof(gameDesc));
  
      // Set up the ADGameDescription part based on detected version
@@ -811,7 +907,7 @@
          gameDesc.desc.gameid = "gob3";
          gameDesc.desc.extra = "VGA";
          gameDesc.gameType = Gob::kGameTypeGob3;
-@@ -346,13 +470,15 @@
+@@ -346,13 +487,15 @@
          printf("GOB: Configuring for Gobliiins 1 (EGA)\n");
      }
  
@@ -834,24 +930,35 @@
  
      printf("GOB: Creating engine instance...\n");
  
-@@ -378,9 +504,15 @@
+@@ -378,10 +521,15 @@
  static bool launchAGIGame(const char *gamePath) {
      printf("AGI: Attempting to launch game from %s\n", gamePath);
  
-+    // PicoCalc: a domain per folder, quest-<folder>, so each AGI game's
-+    // saves are its own; /quest/agi keeps upstream's quest-agi. The path
-+    // goes in it, so it is set second.
-+    const char *folder = strrchr(gamePath, '/');
-+    Common::String domain = Common::String("quest-") + (folder ? folder + 1 : gamePath);
-+    ConfMan.setActiveDomain(domain);
++    // PicoCalc: the game's own domain, before the path that goes in it.
++    setGameDomain(gamePath);
 +
      // Set up the game path in config manager
      ConfMan.set("path", gamePath);
 -    ConfMan.setActiveDomain("quest-agi");
  
++    // PicoCalc: AGI's own save and restore screens, as SCI's (below).
++    ConfMan.setBool("originalsaveload", true);
++
      // Set default audio/config values that Engine::syncSoundSettings() expects
      ConfMan.setInt("music_volume", 192);
-@@ -614,20 +746,30 @@
+     ConfMan.setInt("sfx_volume", 192);
+@@ -578,8 +726,9 @@
+            gameId == 1 ? "Kyrandia 2 (Hand of Fate)" : "Kyrandia 1 (Legend of Kyrandia)",
+            gamePath);
+ 
++    // PicoCalc: the game's own domain, before the path that goes in it.
++    setGameDomain(gamePath);
+     ConfMan.set("path", gamePath);
+-    ConfMan.setActiveDomain("quest-kyra");
+ 
+     // Audio/config defaults
+     ConfMan.setInt("music_volume", 192);
+@@ -614,20 +763,30 @@
      static KYRAGameDescription gameDesc;
      memset(&gameDesc, 0, sizeof(gameDesc));
  
@@ -895,7 +1002,31 @@
  
      printf("KYRA: Creating engine...\n");
      ::Engine *engine = (gameId == 1)
-@@ -763,12 +905,16 @@
+@@ -708,8 +867,9 @@
+     printf("SCI: Launching game from %s (id=%s)\n", gamePath,
+            gameIdStr ? gameIdStr : "(auto)");
+ 
++    // PicoCalc: the game's own domain, before the path that goes in it.
++    setGameDomain(gamePath);
+     ConfMan.set("path", gamePath);
+-    ConfMan.setActiveDomain("quest-sci");
+ 
+     ConfMan.setInt("music_volume", 192);
+     ConfMan.setInt("sfx_volume", 192);
+@@ -736,7 +896,11 @@
+     // SCI-specific prefs
+     ConfMan.setBool("copy_protection", false);
+     ConfMan.setBool("prefer_digitalsfx", false);
+-    ConfMan.setBool("originalsaveload", false);
++    // PicoCalc: the game's own save and restore screens, with their slots
++    // and names. Without them SCI uses ScummVM's chooser, which upstream
++    // stubs to always slot 0, so every save overwrote the last
++    // (picocalc-quest design.md §10.2; found in M7).
++    ConfMan.setBool("originalsaveload", true);
+     ConfMan.setBool("enable_black_lined_video", false);
+     ConfMan.setBool("windows_cursors", false);
+     ConfMan.setBool("silver_cursors", false);
+@@ -763,12 +927,16 @@
  
      static ADGameDescription gameDesc;
      memset(&gameDesc, 0, sizeof(gameDesc));
@@ -918,7 +1049,18 @@
  
      ConfMan.set("gameid", gameDesc.gameid);
  
-@@ -1028,6 +1174,9 @@
+@@ -867,8 +1035,9 @@
+     printf("SCUMM: Launching %s (v%d, id=%s) from %s\n",
+            info->gameid, info->version, info->gameid, gamePath);
+ 
++    // PicoCalc: the game's own domain, before the path that goes in it.
++    setGameDomain(gamePath);
+     ConfMan.set("path", gamePath);
+-    ConfMan.setActiveDomain("quest-scumm");
+ 
+     ConfMan.setInt("music_volume", 192);
+     ConfMan.setInt("sfx_volume", 192);
+@@ -1028,6 +1197,9 @@
      ConfMan.registerDefault("language",                        "en");
      ConfMan.registerDefault("gfx_mode",                        "normal");
      ConfMan.registerDefault("render_mode",                     "");
@@ -928,7 +1070,7 @@
  }
  
  // Dispatch a QuestGame to the engine launcher it belongs to. Returns
-@@ -1164,11 +1313,16 @@
+@@ -1164,11 +1336,16 @@
          // selector frame and the device looks frozen.
          frank_quest_show_loading(g);
  
@@ -947,10 +1089,20 @@
          // game finished) or via Ctrl+Alt+Del → EVENT_QUIT. Tear down
 --- a/src/frank_quest_selector.cpp
 +++ b/src/frank_quest_selector.cpp
-@@ -72,6 +72,17 @@
+@@ -15,6 +15,8 @@
+ 
+ #include "frank_quest_selector.h"
+ #include "frank_quest_fs.h"
++// picocalc-quest: Esc leaves the selector (design.md §13.3).
++#include "picocalc_exit.h"
+ 
+ #include "backends/platform/rp2350/rp2350-system.h"
+ #include "backends/platform/rp2350/rp2350-minimal.h"
+@@ -71,6 +73,17 @@
+ 	// --- SCUMM v7 ---
  	{"ft",       "ft.la0",        "Full Throttle",                    QuestEngine::Scumm, 0, "ft"},
  	{"fulltp",   "ft.la0",        "Full Throttle",                    QuestEngine::Scumm, 0, "fulltp"},
- 
++
 +	// --- AGI (Sierra), by name: PicoCalc. Before SCI, since SCI remade
 +	// several of them under the same name; LOGDIR is AGI's and not SCI's.
 +	// Each has its own config domain, so its own saves (main.cpp). ---
@@ -961,7 +1113,31 @@
 +	{"sq2",      "LOGDIR", "Space Quest II",              QuestEngine::Agi, 0, ""},
 +	{"lsl1",     "LOGDIR", "Leisure Suit Larry 1 (AGI)",  QuestEngine::Agi, 0, ""},
 +	{"pq1",      "LOGDIR", "Police Quest I (AGI)",        QuestEngine::Agi, 0, ""},
-+
+ 
  	// --- SCI (Sierra) ---
  	{"kq1",      NULL, "King's Quest I",                 QuestEngine::Sci, 0, "kq1"},
- 	{"kq4",      NULL, "King's Quest IV",                QuestEngine::Sci, 0, "kq4"},
+@@ -513,7 +526,10 @@
+ 	drawText(surf, colA, L.legendY,     "UP/DOWN: Navigate",    kColDim);
+ 	drawText(surf, colB, L.legendY,     "PGUP/PGDN: Page",      kColDim);
+ 	drawText(surf, colA, L.legendY + 9, "ENTER: Launch",        kColDim);
+-	drawText(surf, colB, L.legendY + 9, "CTRL+ALT+DEL: Reset",  kColDim);
++	// PicoCalc: where Esc leaves to, in place of the reset, when it can
++	// leave (picocalc-quest design.md §13.3).
++	const char *exitLabel = picocalc_exit_label();
++	drawText(surf, colB, L.legendY + 9, exitLabel ? exitLabel : "CTRL+ALT+DEL: Reset", kColDim);
+ 
+ 	g_system->unlockScreen();
+ 	g_system->updateScreen();
+@@ -683,6 +699,12 @@
+ 		bool dirty = false;
+ 		while (sys->pollEvent(ev)) {
+ 			if (ev.type != Common::EVENT_KEYDOWN) continue;
++			// PicoCalc: Esc leaves, to the shell or by powering off, and
++			// returns only if it cannot; with no games too (§13.3).
++			if (ev.kbd.keycode == Common::KEYCODE_ESCAPE) {
++				picocalc_exit();
++				continue;
++			}
+ 			if (count <= 0) continue;
+ 
+ 			int prevSel = selected;

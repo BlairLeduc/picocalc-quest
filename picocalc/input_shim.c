@@ -12,7 +12,8 @@
  * poll reads through ps2_mouse_get_state; Alt+M switches modes. Where a
  * key goes is decided at its press and kept to its release, so a mode
  * change with a key held cannot strand its up. In the selector every key
- * goes to it.
+ * goes to it. The button keys, the pointer's speed and each engine's
+ * starting mode are the settings' (settings.h, §10.3).
  */
 
 #include <stdio.h>
@@ -26,6 +27,7 @@
 #include "pointer.h"
 #include "ps2.h"
 #include "ps2kbd_wrapper.h"
+#include "settings.h"
 #include "status.h"
 
 /* main.c: park core 1 and reboot (§13.1). */
@@ -54,9 +56,18 @@ volatile uint32_t g_input_stray;
 
 volatile uint32_t g_pointer_latency_max_us;
 
+/* The band's help for each mode, with the button keys in it. */
+static char s_help_pointer[48], s_help_keys[48];
+
 void ps2kbd_init(void) {
     keymap_reset(&s_keymap);
     pointer_init(&s_pointer);
+    s_pointer.v0 = POINTER_V0 * g_settings.pointer_speed / 100u;
+    s_pointer.v1 = POINTER_V1 * g_settings.pointer_speed / 100u;
+    snprintf(s_help_pointer, sizeof s_help_pointer, "%c left button  %c right  Ctrl+arrow: 1 px",
+             g_settings.left_button, g_settings.right_button);
+    snprintf(s_help_keys, sizeof s_help_keys, "%c and %c type themselves",
+             g_settings.left_button, g_settings.right_button);
 }
 
 void ps2kbd_flush(void) {
@@ -69,9 +80,9 @@ void ps2kbd_flush(void) {
 
 static void show_mode(void) {
     if (s_mode == MODE_POINTER) {
-        status_show("Arrows: pointer  (Alt+M: keys)", "] left button  [ right  Ctrl+arrow: 1 px");
+        status_show("Arrows: pointer  (Alt+M: keys)", s_help_pointer);
     } else {
-        status_show("Arrows: keys  (Alt+M: pointer)", "[ and ] type themselves");
+        status_show("Arrows: keys  (Alt+M: pointer)", s_help_keys);
     }
 }
 
@@ -82,9 +93,10 @@ void picocalc_input_game(int engine) {
         s_mode = MODE_SELECTOR;
         return;
     }
-    /* AGI's hero walks with the arrows; every other engine is pointed
-     * and clicked. SCI0 takes both, and starts as a pointer (§9.3). */
-    s_mode = engine == PICOCALC_ENGINE_AGI ? MODE_KEYS : MODE_POINTER;
+    /* By default AGI's arrows are keys, every other engine's the
+     * pointer (settings.c). */
+    bool pointer = engine > 0 && engine < SETTINGS_ENGINES && g_settings.pointer_mode[engine];
+    s_mode = pointer ? MODE_POINTER : MODE_KEYS;
     show_mode();
 }
 
@@ -93,7 +105,9 @@ static route_t route_for(const km_event_t *e) {
     if (e->keycode == 'm' && e->flags == KM_MOD_ALT) return ROUTE_MODE;
     if (s_mode != MODE_POINTER) return ROUTE_ENGINE;
     if (e->keycode >= KM_KEY_UP && e->keycode <= KM_KEY_LEFT) return ROUTE_ARROW;
-    if (e->keycode == '[' || e->keycode == ']') return ROUTE_BUTTON;
+    if (e->keycode == g_settings.left_button || e->keycode == g_settings.right_button) {
+        return ROUTE_BUTTON;
+    }
     return ROUTE_ENGINE;
 }
 
@@ -144,7 +158,8 @@ static bool take_key(route_t route, const km_event_t *e, uint32_t queued) {
     }
     case ROUTE_BUTTON:
         if (!e->repeat) {
-            pointer_button(&s_pointer, e->keycode == ']' ? PTR_BUTTON_LEFT : PTR_BUTTON_RIGHT,
+            pointer_button(&s_pointer,
+                           e->keycode == g_settings.left_button ? PTR_BUTTON_LEFT : PTR_BUTTON_RIGHT,
                            e->down);
         }
         return true;

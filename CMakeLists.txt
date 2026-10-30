@@ -127,6 +127,7 @@ else()
         picocalc/board.c
         picocalc/clock.c
         picocalc/core1.c
+        picocalc/exit.c
         picocalc/fatal.c
         picocalc/font8x10.c
         picocalc/framepool.c
@@ -139,6 +140,7 @@ else()
         picocalc/page.c
         picocalc/pointer.c
         picocalc/psram_check.c
+        picocalc/settings.c
         picocalc/southbridge.c
         picocalc/status.c
         picocalc/syscalls.c
@@ -204,6 +206,8 @@ else()
         SDCARD_PIN_SPI0_SCK=18
         SDCARD_PIN_SPI0_MOSI=19
         SDCARD_CLK_FAST=25000000
+        # get_fattime() from the PicoCalc clock, not the driver's (§13.2).
+        SDCARD_EXTERNAL_FATTIME=1
 
         # clk_peri follows clk_sys, for the LCD's SPI divider (§11.1).
         PICO_CLOCK_ADJUST_PERI_CLOCK_WITH_SYS_CLOCK=1
@@ -251,13 +255,16 @@ else()
     # heartbeat (main.c, §14.3); upstream's scan of /quest, timed (main.c,
     # §16 M3), by its C++ name: frank_quest_scan_games(QuestGame *, int);
     # the PSRAM mspace's creation, so the selector can report the heap
-    # (main.c, M4); and exit(), which error() ends in (fatal.c).
+    # (main.c, M4); exit(), which error() ends in (fatal.c); and a file's
+    # open for writing and close, to time saves (main.c, M7).
     target_link_options(picocalc-quest PRIVATE
         -Wl,--wrap=cabal_delay
         -Wl,--wrap=cabal_update_screen
         -Wl,--wrap=_Z22frank_quest_scan_gamesP9QuestGamei
         -Wl,--wrap=create_mspace_with_base
-        -Wl,--wrap=exit)
+        -Wl,--wrap=exit
+        -Wl,--wrap=cabal_file_open_write
+        -Wl,--wrap=cabal_file_close)
 
     # Upstream's linker script: the 64 KB main stack the GOB engine needs
     # (§5.4, §12.1).
