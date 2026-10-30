@@ -54,7 +54,8 @@ the way, two of them upstream's.
   the key", and the PicoCalc switched itself off.
 - **From the shell** (the Plus 2): Esc went back to the shell; a King's
   Quest I save showed the shell's local date and time in the game's list,
-  and the file's time on the card was right.
+  and the file's time on the card was right. With the exit page held
+  2 s, the owner could read it.
 - **Without the shell**: the save files on the card read 31 December 2021,
   11 pm on a Mac, which is FatFs's 1 January 2022 00:00 shifted an hour
   by macOS's daylight-saving handling of FAT times (not read raw).
@@ -91,7 +92,7 @@ close, so the engine's time as well as the card's:
 
 **Not checked:** the banner's time against the shell's on a launch from
 the shell (no UART on the Plus 2); the time from Esc to the shell's first
-screen; the 2 s exit page on the board; the fallback date in a game's save
+screen; the fallback date in a game's save
 list; Day of the Tentacle's save time (made before a capture was running);
 Esc with neither way out; a card taken out during a game, since the fix;
 the button, mode and volume settings by the owner; the release build on
