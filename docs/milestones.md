@@ -4,6 +4,124 @@ What each milestone verified, on which board, on what date, and what was
 not checked, newest first. `design.md` §16 holds each milestone's scope
 and done-when criteria; this file keeps the full record.
 
+**M5 (audio) is done**, on 2026-10-29, on the same Pimoroni Pico Plus 2 W
+in a PicoCalc, flashed over SWD, with Arm GCC 15.2.Rel1 and SDK 2.3.1,
+development build. Music, speech and effects checked by ear by the owner in
+one title per engine, Full Throttle's digital iMUSE among them. Two faults
+found and fixed on the way, one of them upstream's; core 0's busy share
+passes the gate with audio in every title but Space Quest IV.
+
+- **The output** (`picocalc/audio_shim.c`, §8.1–8.2, adapted from
+  pico-oric): PWM on GP26/27, TOP 4095, divider 1, oversample 2, so
+  **36,621 Hz at 12 bits**; two chained DMA channels over an 8 KB ring of
+  two 512-frame halves, with the read wrap; upstream's mixer called inside
+  the refill IRQ, as upstream's I2S driver did. The IRQ is **DMA_IRQ_1**,
+  not the design's line 0: upstream masks line 1 in `lockMutex()` and
+  around every PSRAM heap call, and the mixer frees memory in the IRQ.
+- **The patch** (now ten files): the mixer created at the shim's rate, not
+  a literal 44,100; `lockMutex()` rewritten (below); the OPL emulator the
+  build's for every engine (`PICOCALC_QUEST_OPL`); no key repeats of the
+  arrows and diagonals in upstream's event manager (below).
+- **The OPL emulator** (§8.3): in Fate of Atlantis's intro, MAME's (what
+  `auto` picks) took 45–55 % of core 0, longest half 10.8 ms; DOSBox's
+  13–18 %, 4.4 ms. The owner heard MAME's as a little softer and better,
+  DOSBox's as not bad, and chose by CPU: **DOSBox by default**, MAME's a
+  build option, to revisit after M8's SRAM placement.
+- **Counters** (§14.3): the heartbeat adds the audio IRQ's share of core 0,
+  halves refilled, the longest refill and late refills; the busy share now
+  counts the IRQ's time inside `cabal_delay` as work. `gate.sh` reports
+  the audio per title, and reads logs byte-safely.
+- **The late path, forced** (`PICOCALC_QUEST_AUDIO_STALL=30`): see below.
+- **Host:** `test_sound`: every int16 sample at every volume against a
+  model in doubles, monotonic, the extremes, left and right in their
+  halves of the word. A planted fault (division for the shift) failed it.
+
+**Checked on the board** (UART logs `out/m5-*.log`, not committed):
+
+- **By the owner, by ear**, DOSBox's OPL: Fate of Atlantis's intro;
+  Goblins 3's effects (named Gobliins 2 at the time; the log has Goblins 3); Kyrandia (good, its music quiet); Space Quest III;
+  Space Quest IV (good, "a bit harsh"); King's Quest III; **Full Throttle,
+  about ten minutes, "sounds great"**. Gobliiins and Goblins 3 had no music:
+  the card's are CD releases, whose music is CD audio, and upstream's CD
+  manager is an empty stub (deferred, §19).
+- **Late refills**: 0 over Space Quest III (some 30 minutes in all), Space
+  Quest IV (7 minutes), Kyrandia (4), King's Quest III (5), the Gob games
+  and Fate of Atlantis. Full Throttle: 6 in one ten-minute run and 4 in
+  another, each group of 3 at a scene change, explained below.
+- **The late path forced**: core 0's interrupts masked 30 ms every 5 s
+  through Fate of Atlantis's music: 2.8 late refills a stall, refills
+  70–73 a second around each, no storm, playback on after every stall.
+- **The mutex fix**: Space Quest III launched nine times, two minutes each
+  (roundtrip by UART): no stop, 0 late refills, the PSRAM heap 263,808 B
+  at all eight selector entries between.
+- **Held arrows** in Space Quest III, by the owner: Roger walks.
+
+**The gate again** (busy share with audio, `gate.sh`, the busiest 5 s after
+loading, %):
+
+| Title | Busy, median / busiest 5 s | Audio, median / max | Longest refill |
+|---|---:|---:|---:|
+| Fate of Atlantis (intro) | 25 / 74 | 15 / 21 | 6.8 ms |
+| Gobliiins / Goblins 3 | 20 / 22, 19 / 26 | 1 / 1, 1 / 3 | 0.7 ms |
+| Kyrandia | 27 / 69 | 9 / 18 | 7.0 ms |
+| Space Quest III | 37 / 63 | 28 / 38 | 6.8 ms |
+| **Space Quest IV** | **87 / 100** | 36 / 45 | 7.8 ms |
+| King's Quest III | 15 / 47 | 3 / 4 | 1.2 ms |
+| Full Throttle | 50 / 68 | 3 / 10 | 5.4 ms |
+
+**Space Quest IV fails** with audio (86–94 % busy in play). PC samples, 15 s
+in its intro: `memcpy` 26 % (the one remaining copy of the 64 KB screen,
+20–22 frames a second), DOSBox's OPL about 20 % (SCI asks for two OPL2 in
+stereo), sleep 11 %, the interpreter a few percent. M8's levers for it, in
+order: copy only what changed, the OPL and mixer in SRAM, one mono OPL2.
+
+**Measured** (development build):
+
+- Refills **71.5 a second** (14.0 ms); a refill with nothing playing
+  0.1–0.4 ms; the longest in any title 7.8 ms (Space Quest IV), under
+  half the deadline.
+- RAM used to 147,316 bytes, leaving **311,436 of 448 KB** (M4: 328,064);
+  `.bss` 114,548 (the 8 KB ring, aligned to its size, and 2 KB of mix
+  buffer), `.data` 22,276, text 2,673,788 plus `.rodata` 1,045,888.
+- Core 1's stack 804 bytes at most (M4: 748).
+
+**Host:** the six tests pass, the patch round trip with the patch now ten
+files.
+
+**Found:**
+- **Upstream's `lockMutex()` could leave the audio IRQ masked for good.**
+  It kept the IRQ's state in each mutex; SCI's music mutex is taken by the
+  engine and by its MIDI timer inside the mixer, and the IRQ, taken just
+  after the engine's mask (no barrier), recorded "was disabled" over the
+  engine's "was enabled". The DMA then replayed the ring's last 28 ms
+  through every later launch until a power cycle. Space Quest III's intro
+  did it in two runs of three; SWD showed the IRQ's enable bit clear and
+  its pending bit set; a scratch build recording each mask named the
+  unmatched one (`SoundCommandParser` under `kGetEvent`). Fixed (§8.2);
+  HW §5.9.
+- **Held arrows walked Roger in fits**: the MCU's repeats went through as
+  presses, and upstream's event manager makes its own (400 ms, then every
+  100 ms); SCI0 and AGI take a second press of the walking direction as
+  stop. The MCU's are dropped, and the event manager repeats no arrow or
+  diagonal (§9.1).
+- **Full Throttle's iMUSE reads from the card under its mutex**, which
+  masks the audio IRQ: **163 ms** at a scene change, 3 late refills,
+  not heard by the owner. Recorded for M8 by the owner's choice; HW §5.9.
+- **A SMUSH picture fault in Full Throttle** at a scene change (about
+  6 min 15 s in, the same second as the hold-off): each row a few pixels
+  short, the picture sheared, the moving parts right. Not investigated;
+  M8 by the owner's choice.
+- Kyrandia alone calls upstream's heap walk, which prints up to 1,024
+  chunks with the audio IRQ masked while it loads; no late refill seen.
+- An OpenOCD `halt` and `resume` on core 0 left core 1 halted (the
+  configuration treats the cores together): no log, no panel. Read the
+  core without halting (PC sampling, memory reads) while it runs.
+
+**Not checked:** the release build on the board; MAME's OPL beyond Fate of
+Atlantis's intro; Kyrandia's quiet music and SQ4's harshness against
+another player; the volume (unity gain, not tuned); CD-audio music (Gob CD,
+deferred); a held arrow in a menu (now taps); the pointer (M6); saves (M7).
+
 **M4 (first games, and the gate) is done**, on 2026-10-29, on the same
 Pimoroni Pico Plus 2 W in a PicoCalc, flashed over SWD, with Arm GCC
 15.2.Rel1 and SDK 2.3.1, development build. An AGI game played for 11

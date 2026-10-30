@@ -12,6 +12,10 @@
 # are loading, and are left out of the busiest figures; they are shown
 # apart. A title passes when its busiest window is under GATE percent.
 #
+# With M5's audio, each title's line adds the audio IRQ's share of core 0
+# (median and busiest second, after loading), its longest refill in ms
+# against the 14 ms half, and the late refills while it ran.
+#
 # Then the heap at each selector entry (main.c's heap line): a round trip
 # passes when every entry after the first matches the first. Exits 1 if
 # a title fails the gate or the heap moved.
@@ -21,7 +25,7 @@ case "${1:-}" in
     -h|--help|"") sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
 esac
 
-cat "$@" | tr -d '\r' | awk -v gate="${GATE:-75}" -v settle="${SETTLE:-5}" -v window="${WINDOW:-5}" '
+cat "$@" | LC_ALL=C tr -d '\r' | LC_ALL=C awk -v gate="${GATE:-75}" -v settle="${SETTLE:-5}" -v window="${WINDOW:-5}" '
 function finish(how,    i, j, k, n, sorted, med, p90, max1, sum, best, bestf, at, lmax) {
     if (title == "") return
     n = 0
@@ -56,6 +60,17 @@ function finish(how,    i, j, k, n, sorted, med, p90, max1, sum, best, bestf, at
     if (best >= gate) failed++
     printf "%-44s %4ds  busy med %5.1f p90 %5.1f max %5.1f  busiest %ds %5.1f%% at +%ds, %4.1f frames/s  load max %5.1f  %s  %s\n",
            title, nb, med, p90, max1, window, best, at, bestf, lmax, verdict, how
+    if (has_audio) {
+        n = 0
+        for (i = settle + 1; i <= nb; i++) sorted[++n] = audio[i]
+        for (i = 2; i <= n; i++) {
+            k = sorted[i]
+            for (j = i - 1; j >= 1 && sorted[j] > k; j--) sorted[j + 1] = sorted[j]
+            sorted[j + 1] = k
+        }
+        printf "%-44s        audio med %5.1f max %5.1f  longest refill %5.2f ms  late %d\n",
+               "", sorted[int((n + 1) / 2)], sorted[n], amax / 1000, late_last - late_first
+    }
     title = ""
 }
 /^hb 1:/ { finish("RESTARTED"); boots++ }
@@ -65,8 +80,8 @@ function finish(how,    i, j, k, n, sorted, med, p90, max1, sum, best, bestf, at
     title = $0
     sub(/.*launching /, "", title)
     sub(/ \(engine=.*/, "", title)
-    nb = 0
-    delete busy; delete frames
+    nb = 0; has_audio = 0; amax = 0; late_first = -1
+    delete busy; delete frames; delete audio
     next
 }
 /FRANK Quest: game completed cleanly/ { finish("ended cleanly"); next }
@@ -75,6 +90,15 @@ function finish(how,    i, j, k, n, sorted, med, p90, max1, sum, best, bestf, at
     b = $0; sub(/.*core 0 busy /, "", b); sub(/%.*/, "", b)
     f = $0; sub(/.*, frames /, "", f); sub(/,.*/, "", f)
     nb++; busy[nb] = b + 0; frames[nb] = f + 0
+    if ($0 ~ /, audio /) {
+        a = $0; sub(/.*, audio /, "", a); sub(/%.*/, "", a)
+        m = $0; sub(/.* halves \(max /, "", m); sub(/ us.*/, "", m)
+        l = $0; sub(/.*\), late /, "", l); sub(/,.*/, "", l)
+        has_audio = 1; audio[nb] = a + 0
+        if (nb > settle && m + 0 > amax) amax = m + 0
+        if (late_first < 0) late_first = l + 0
+        late_last = l + 0
+    }
     next
 }
 /picocalc-quest: heap: / {

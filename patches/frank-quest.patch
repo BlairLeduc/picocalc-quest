@@ -25,6 +25,34 @@
  /* get the current time */
  DWORD get_fattime (void)
  {
+--- a/src/backends/events/default/default-events.cpp
++++ b/src/backends/events/default/default-events.cpp
+@@ -109,6 +109,25 @@
+ 			_currentKeyDown.flags = event.kbd.flags;
+ 			_keyRepeatTime = time + kKeyRepeatInitialDelay;
+ 
++			// PicoCalc: no repeats of the arrows and the diagonals (Home,
++			// End, Page Up, Page Down). AGI and SCI take a second press of
++			// the direction ego walks in as stop, so a held arrow walked
++			// in fits (picocalc-quest design.md §9.1; found in M5).
++			switch (event.kbd.keycode) {
++			case Common::KEYCODE_UP:
++			case Common::KEYCODE_DOWN:
++			case Common::KEYCODE_LEFT:
++			case Common::KEYCODE_RIGHT:
++			case Common::KEYCODE_HOME:
++			case Common::KEYCODE_END:
++			case Common::KEYCODE_PAGEUP:
++			case Common::KEYCODE_PAGEDOWN:
++				_currentKeyDown.keycode = 0;
++				break;
++			default:
++				break;
++			}
++
+ 			if (event.kbd.keycode == Common::KEYCODE_BACKSPACE) {
+ 				// WORKAROUND: Some engines incorrectly attempt to use the
+ 				// ascii value instead of the keycode to detect the backspace
 --- a/src/backends/platform/rp2350/rp2350-minimal.cpp
 +++ b/src/backends/platform/rp2350/rp2350-minimal.cpp
 @@ -23,6 +23,8 @@
@@ -127,13 +155,21 @@
  
 --- a/src/backends/platform/rp2350/rp2350-system.cpp
 +++ b/src/backends/platform/rp2350/rp2350-system.cpp
-@@ -43,6 +43,33 @@
- 	if (g_mixer) {
- 		g_mixer->mixCallback(stream, len);
- 	}
-+}
-+#endif
+@@ -35,6 +35,10 @@
+ // Global mixer pointer for audio callback
+ static Audio::MixerImpl *g_mixer = nullptr;
+ 
++// PicoCalc: the PWM output's sample rate, from the system clock
++// (picocalc-quest design.md §8.1, §8.2).
++extern "C" unsigned cabal_audio_sample_rate(void);
 +
+ // Audio callback function called from C audio driver
+ #ifdef USE_I2S_AUDIO
+ extern "C" void cabal_audio_set_mixer_callback(void (*callback)(uint8_t *stream, int len));
+@@ -46,6 +50,33 @@
+ }
+ #endif
+ 
 +// PicoCalc: updateScreen() copies and publishes a frame only when
 +// something it shows has changed since the last one (picocalc-quest
 +// design.md §7.2): anything that writes the screen or the overlay, the
@@ -158,10 +194,13 @@
 +	for (int i = 0, n = s.getPitch() * s.getHeight() / 4; i < n; i++)
 +		sum = (sum << 5 | sum >> 27) ^ p[i];
 +	return sum;
- }
- #endif
- 
-@@ -61,6 +88,7 @@
++}
++#endif
++
+ // Graphics mode
+ static const OSystem::GraphicsMode s_supportedGraphicsModes[] = {
+ 	{"1x", "Normal", 1},
+@@ -61,6 +92,7 @@
  
  	memset(&_cursor, 0, sizeof(_cursor));
  	memset(_palette, 0, sizeof(_palette));
@@ -169,7 +208,19 @@
  }
  
  OSystem_RP2350::~OSystem_RP2350() {
-@@ -207,6 +235,7 @@
+@@ -136,8 +168,9 @@
+ 	// Record start time
+ 	_startTime = cabal_get_millis();
+ 
+-	// Create mixer at 44100 Hz (standard CD quality)
+-	_mixer = new Audio::MixerImpl(this, 44100);
++	// PicoCalc: the mixer at the PWM output's rate, not 44100 Hz
++	// (picocalc-quest design.md §8.2).
++	_mixer = new Audio::MixerImpl(this, cabal_audio_sample_rate());
+ 	_mixer->setReady(true);
+ 	g_mixer = _mixer;
+ 
+@@ -207,6 +240,7 @@
  
  	// Create overlay surface (same size, 8bpp for simplicity)
  	_overlay.create(width, height, Graphics::PixelFormat::createFormatCLUT8());
@@ -177,7 +228,7 @@
  }
  
  int16 OSystem_RP2350::getHeight() {
-@@ -249,9 +278,12 @@
+@@ -249,9 +283,12 @@
  		src += pitch;
  		dst += dstPitch;
  	}
@@ -190,7 +241,7 @@
  	return &_screen;
  }
  
-@@ -263,31 +295,63 @@
+@@ -263,31 +300,63 @@
  	if (_screen.getPixels()) {
  		memset(_screen.getPixels(), col, _screen.getWidth() * _screen.getHeight());
  	}
@@ -271,7 +322,7 @@
  	// Drive the DefaultTimerManager — SCI's music/sound engine and
  	// several other subsystems register ~60 Hz callbacks here, and
  	// without the pulse cutscenes and fades stall mid-sequence.
-@@ -308,11 +372,13 @@
+@@ -308,11 +377,13 @@
  
  void OSystem_RP2350::showOverlay() {
  	_overlayVisible = true;
@@ -285,7 +336,7 @@
  	cabal_hide_overlay();
  }
  
-@@ -325,6 +391,7 @@
+@@ -325,6 +396,7 @@
  		// Copy screen to overlay
  		memcpy(_overlay.getPixels(), _screen.getPixels(), _screenWidth * _screenHeight);
  	}
@@ -293,7 +344,7 @@
  }
  
  void OSystem_RP2350::grabOverlay(void *buf, int pitch) {
-@@ -352,6 +419,7 @@
+@@ -352,6 +424,7 @@
  		src += pitch;
  		dst += dstPitch;
  	}
@@ -301,7 +352,7 @@
  }
  
  int16 OSystem_RP2350::getOverlayHeight() {
-@@ -383,6 +451,15 @@
+@@ -383,6 +456,15 @@
  void OSystem_RP2350::setMouseCursor(const void *buf, uint w, uint h, int hotspotX, int hotspotY,
                                      uint32 keycolor, bool dontScale,
                                      const Graphics::PixelFormat *format) {
@@ -317,7 +368,83 @@
  	if (_cursor.data) {
  		delete[] _cursor.data;
  	}
-@@ -587,4 +664,7 @@
+@@ -534,39 +616,63 @@
+ // else touches the shared state. HDMI runs on DMA_IRQ_0 and stays
+ // enabled.
+ //
+-// The MutexRef holds a nesting counter bit-packed with the previous
+-// IRQ-enabled state so recursive locks nest cleanly.
++// PicoCalc: one depth count masks the IRQ for the whole system, and a
++// lock taken inside the audio IRQ does nothing, since nothing it guards
++// against can run then (picocalc-quest design.md §8.2). Upstream kept
++// the IRQ's previous state in each mutex, and some mutexes are taken
++// from both sides: SCI's music mutex by the engine and by its MIDI timer,
++// which runs in the mixer. The IRQ could still be taken just after the
++// engine's mask, which had no barrier, see the mask, and record "was
++// disabled" over the engine's "was enabled", and the engine's unlock then
++// left the IRQ masked for good (found in M5). The barriers make the mask
++// take effect before the lock returns.
+ 
++#include "hardware/sync.h"
++
+ struct CabalMutex {
+ 	int nesting;
+-	bool wasEnabled;
+ };
+ 
++static int s_maskDepth;
++
++static inline bool inAudioIrq() {
++	return __get_current_exception() == VTABLE_FIRST_IRQ + DMA_IRQ_1;
++}
++
+ OSystem::MutexRef OSystem_RP2350::createMutex() {
+-	return reinterpret_cast<MutexRef>(new CabalMutex{0, false});
++	return reinterpret_cast<MutexRef>(new CabalMutex{0});
+ }
+ 
+ void OSystem_RP2350::lockMutex(MutexRef mutex) {
+ 	auto *m = reinterpret_cast<CabalMutex *>(mutex);
+-	if (!m) return;
+-	if (m->nesting == 0) {
+-		m->wasEnabled = irq_is_enabled(DMA_IRQ_1);
+-		if (m->wasEnabled) irq_set_enabled(DMA_IRQ_1, false);
++	if (!m || inAudioIrq()) return;
++	if (s_maskDepth++ == 0) {
++		irq_set_enabled(DMA_IRQ_1, false);
++		__dsb();
++		__isb();
+ 	}
+ 	++m->nesting;
+ }
+ 
+ void OSystem_RP2350::unlockMutex(MutexRef mutex) {
+ 	auto *m = reinterpret_cast<CabalMutex *>(mutex);
+-	if (!m || m->nesting <= 0) return;
++	if (!m || inAudioIrq() || m->nesting <= 0) return;
+ 	--m->nesting;
+-	if (m->nesting == 0 && m->wasEnabled) {
++	if (--s_maskDepth == 0)
+ 		irq_set_enabled(DMA_IRQ_1, true);
+-	}
+ }
+ 
++// A mutex deleted while locked gives back its share of the mask.
+ void OSystem_RP2350::deleteMutex(MutexRef mutex) {
+-	delete reinterpret_cast<CabalMutex *>(mutex);
++	auto *m = reinterpret_cast<CabalMutex *>(mutex);
++	if (m && m->nesting > 0 && !inAudioIrq()) {
++		s_maskDepth -= m->nesting;
++		if (s_maskDepth <= 0) {
++			s_maskDepth = 0;
++			irq_set_enabled(DMA_IRQ_1, true);
++		}
++	}
++	delete m;
+ }
+ 
+ // Audio
+@@ -587,4 +693,7 @@
  
  void OSystem_RP2350::logMessage(LogMessageType::Type type, const char *message) {
  	printf("%s\n", message);
@@ -651,7 +778,17 @@
  static bool launchGOBGameWithVersion(const char *gamePath, int gobVersion) {
      printf("GOB: Launching game from %s as Gobliiins %d\n", gamePath, gobVersion);
  
-@@ -326,7 +442,13 @@
+@@ -289,7 +405,8 @@
+     // GOB-specific settings
+     ConfMan.setBool("copy_protection", false);  // Skip copy protection
+     ConfMan.set("language", "en");
+-    ConfMan.set("opl_driver", "auto");
++    // PicoCalc: the OPL emulator is the build's choice, for every engine
++    // (registerConfManDefaults, picocalc-quest design.md §8.3).
+ 
+     // Graphics settings
+     ConfMan.set("gfx_mode", "normal");
+@@ -326,7 +443,13 @@
      memset(&gameDesc, 0, sizeof(gameDesc));
  
      // Set up the ADGameDescription part based on detected version
@@ -666,7 +803,7 @@
          gameDesc.desc.gameid = "gob3";
          gameDesc.desc.extra = "VGA";
          gameDesc.gameType = Gob::kGameTypeGob3;
-@@ -346,13 +468,15 @@
+@@ -346,13 +469,15 @@
          printf("GOB: Configuring for Gobliiins 1 (EGA)\n");
      }
  
@@ -689,7 +826,7 @@
  
      printf("GOB: Creating engine instance...\n");
  
-@@ -378,9 +502,15 @@
+@@ -378,9 +503,15 @@
  static bool launchAGIGame(const char *gamePath) {
      printf("AGI: Attempting to launch game from %s\n", gamePath);
  
@@ -706,7 +843,7 @@
  
      // Set default audio/config values that Engine::syncSoundSettings() expects
      ConfMan.setInt("music_volume", 192);
-@@ -614,20 +744,30 @@
+@@ -614,20 +745,30 @@
      static KYRAGameDescription gameDesc;
      memset(&gameDesc, 0, sizeof(gameDesc));
  
@@ -750,7 +887,7 @@
  
      printf("KYRA: Creating engine...\n");
      ::Engine *engine = (gameId == 1)
-@@ -763,12 +903,16 @@
+@@ -763,12 +904,16 @@
  
      static ADGameDescription gameDesc;
      memset(&gameDesc, 0, sizeof(gameDesc));
@@ -773,6 +910,16 @@
  
      ConfMan.set("gameid", gameDesc.gameid);
  
+@@ -1028,6 +1173,9 @@
+     ConfMan.registerDefault("language",                        "en");
+     ConfMan.registerDefault("gfx_mode",                        "normal");
+     ConfMan.registerDefault("render_mode",                     "");
++    // PicoCalc: the OPL emulator, "db" (DOSBox) or "mame", from the build
++    // (picocalc-quest design.md §8.3): it is most of the mixer's cost.
++    ConfMan.registerDefault("opl_driver",                      PICOCALC_QUEST_OPL);
+ }
+ 
+ // Dispatch a QuestGame to the engine launcher it belongs to. Returns
 --- a/src/frank_quest_selector.cpp
 +++ b/src/frank_quest_selector.cpp
 @@ -72,6 +72,17 @@

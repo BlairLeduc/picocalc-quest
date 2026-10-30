@@ -31,6 +31,7 @@
 #include "psram_allocator.h"
 #include "psram_check.h"
 #include "psram_init.h"
+#include "sound.h"
 #include "video.h"
 
 void cabal_init(void);
@@ -40,12 +41,13 @@ void cabal_report_previous_crash(void);
 
 /* Core 0's time in upstream's delay, for the heartbeat's busy share
  * (§14.3): the link wraps cabal_delay, so upstream's OSystem calls this
- * and the file stays unpatched. */
+ * and the file stays unpatched. The audio IRQ's time within the delay is
+ * work, not idle (§8.2), and is taken out. */
 void __real_cabal_delay(uint32_t ms);
 void __wrap_cabal_delay(uint32_t ms) {
-    uint32_t t0 = time_us_32();
+    uint32_t t0 = time_us_32(), m0 = g_sound.mix_us;
     __real_cabal_delay(ms);
-    g_core0_delay_us += time_us_32() - t0;
+    g_core0_delay_us += (time_us_32() - t0) - (g_sound.mix_us - m0);
 }
 
 /* The same for upstream's screen update, which OSystem calls from

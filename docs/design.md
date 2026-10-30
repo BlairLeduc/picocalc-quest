@@ -27,7 +27,11 @@ same board: the frame pool and the presenter on core 1, upstream's welcome
 screen on the panel, checked by the owner. M3 done on the same board: the
 card mounted and checked before upstream starts, with a page for each
 failure; the keyboard through the key map into upstream's poll; every key
-and Ctrl+Alt+Del checked by the owner (§16, `milestones.md`). Upstream is pinned at commit
+and Ctrl+Alt+Del checked by the owner. M4 done: every engine to an
+interactive screen, the gate passed once upstream's screen copies went. M5
+done: PWM audio at 36,621 Hz with the mixer in the refill IRQ, by ear in
+one title per engine; DOSBox's OPL by default; Space Quest IV over the
+gate with audio, for M8 (§16, `milestones.md`). Upstream is pinned at commit
 `949301b6ef87a5482340167378cd102fcdb82ef2` (2026-05-12, release 1.00).
 
 **Contents**
@@ -262,8 +266,9 @@ The expected patch, to be confirmed at M0:
 | `src/backends/platform/rp2350/rp2350-minimal.cpp` | `cabal_poll_event()` takes its key events from the PicoCalc input layer (§9; done in M3, keys only: the mouse block stays, fed nothing, until M6). Its PS/2 path cannot be shimmed honestly: it gets F-keys as private ASCII bytes that never become `CABAL_KEY_F*`, and it wants mouse deltas. `cabal_system_init()` loses the PS/2 mouse start-up (M3). |
 | `src/board_config.h` | M1/M2 layouts replaced by one PicoCalc block. |
 | `drivers/sdcard/sdcard.c` | `CLK_FAST` made overridable, set to 25 MHz (§10). Its `get_fattime()` (always 0) compiled out in favour of the PicoCalc one (§13.2). |
-| `src/backends/platform/rp2350/rp2350-system.cpp` | `updateScreen()` copies and publishes a frame only when something shown has changed, and hands its own surface to `cabal_update_screen()` in place of a second copy (§7.2; M4). `logMessage()` passes an error's message to the error page (§13.1; M4). To come: `getTimeAndDate()` asks the PicoCalc clock (§13.2, M7), keeping upstream's made-up date as the fallback; `initBackend()` creates the mixer at a literal 44,100 Hz, so the rate comes from the audio shim instead (§8.2, M5; found in M0). |
-| `src/frank_quest_main.cpp` | The Gob, SCI and Kyra launchers look the folder's game up in the engine's own ScummVM table, by its files' MD5s and sizes, and launch with that entry; upstream fixes one version per game, whatever the files (§10.2; M4). Each AGI game gets its own config domain, so its own saves (M4). |
+| `src/backends/platform/rp2350/rp2350-system.cpp` | `updateScreen()` copies and publishes a frame only when something shown has changed, and hands its own surface to `cabal_update_screen()` in place of a second copy (§7.2; M4). `logMessage()` passes an error's message to the error page (§13.1; M4). `initBackend()` creates the mixer at the audio shim's rate, not a literal 44,100 Hz (§8.2; M5, found in M0); `lockMutex()` masks the audio IRQ by one depth count, with barriers, and does nothing inside the IRQ (§8.2; found in M5). To come: `getTimeAndDate()` asks the PicoCalc clock (§13.2, M7), keeping upstream's made-up date as the fallback. |
+| `src/frank_quest_main.cpp` | The Gob, SCI and Kyra launchers look the folder's game up in the engine's own ScummVM table, by its files' MD5s and sizes, and launch with that entry; upstream fixes one version per game, whatever the files (§10.2; M4). Each AGI game gets its own config domain, so its own saves (M4). The OPL emulator is the build's, as upstream's `opl_driver` default (§8.3; M5). |
+| `src/backends/events/default/default-events.cpp` | No key repeats of the arrows and diagonals (§9.1; found in M5). |
 | `src/frank_quest_selector.cpp` | More AGI games by folder name (§10.2; M4). To come: text that names PS/2, mouse clicks or HDMI, with `src/frank_quest_welcome.cpp`. |
 | `src/engines/gob/detection/detection.cpp`, `src/engines/sci/detection.cpp`, `src/engines/kyra/detection.cpp` | A function returning the engine's ScummVM table, which is `static` (M4). |
 
@@ -485,20 +490,41 @@ core 1 would break that protection, so the port keeps upstream's shape:
 - Each refill IRQ calls upstream's mixer callback for one half of the ring,
   converts the stereo `int16` frames to compare words (bias, scale to 12
   bits, each written twice for oversample 2), and re-arms the channel.
-- `DMA_IRQ_0` at priority `0x40`, above everything else on core 0 (HW §5.4).
-- The audio shim keeps upstream's `cabal_audio_*` names and its startup
-  mute. The one audio change to `rp2350-system.cpp` is the mixer's rate,
-  which upstream writes as a literal 44,100 (§5.3).
+- `DMA_IRQ_1` at priority `0x40`, above everything else on core 0 (HW §5.4).
+  Line 1, not 0, because that is the line upstream masks: its `lockMutex()`
+  for the mixer's state, and its PSRAM allocator around every heap call,
+  which the mixer makes from the IRQ (it frees finished channels).
+- The audio shim keeps upstream's `cabal_audio_*` names. The ring and the
+  IRQ start at the first `cabal_audio_init()` and run on across launches,
+  silent while no mixer is set; `cabal_audio_process_frame()`, upstream's
+  main-loop feed, does nothing. Upstream's volume (0–255) is a linear
+  gain, 128 unity, before the 16-to-12-bit conversion (`sound.h`, host
+  tested).
+- Two audio changes to `rp2350-system.cpp` (§5.3): the mixer's rate,
+  which upstream writes as a literal 44,100, comes from the shim; and
+  `lockMutex()` is rewritten (found in M5). Upstream kept the IRQ's
+  previous state in each mutex, and some mutexes are taken from both
+  sides: SCI's music mutex by the engine and by its MIDI timer, which runs
+  inside the mixer. The IRQ could be taken just after the engine's mask
+  (no barrier followed it), find the mask, record "was disabled" over the
+  engine's "was enabled", and the engine's unlock then left the IRQ masked
+  for good: the DMA replayed the ring's last 28 ms, through later launches,
+  until a power cycle. Space Quest III's intro did it in two runs of three;
+  a scratch build recording each mask found the unmatched one in
+  `SoundCommandParser` under `kGetEvent`. Now one depth count masks the IRQ
+  for the system, with DSB and ISB after the mask; a lock inside the audio
+  IRQ does nothing, as nothing it guards against can run then; and a mutex
+  deleted while locked gives back its share. Nine launches of SQ3, two
+  minutes each, after the fix: no stop, 0 late refills.
 
-Until M5 the shim runs the mixer silently (found in M4): each
-`cabal_audio_process_frame()` mixes the frames real time has used, at
-44,100 Hz, into scratch. With the mixer never called, a sound never ended,
-and CD titles (Kyrandia, Space Quest IV) waited for their first voice line
-for ever, in loops that poll no input. That puts the mixer's cost on core 0
-already: in Fate of Atlantis's intro, MAME's OPL2 emulator alone took
-**48 %** of core 0 at 44,100 Hz, and the title's median busy share went
-from 13 % to 70 %. The rate is M5's first lever; DOSBox's OPL emulator
-(which SCI uses) looked far cheaper in Space Quest IV.
+The heartbeat's busy share counts the IRQ's time inside `cabal_delay` as
+work (`main.c`), and reports the audio's share, halves refilled, the
+longest refill and late refills (§14.3).
+
+Before M5 the shim ran the mixer silently (found in M4), at 44,100 Hz into
+scratch: with the mixer never called, a sound never ended, and CD titles
+(Kyrandia, Space Quest IV) waited for their first voice line for ever, in
+loops that poll no input.
 
 ### 8.3 Ring size and deadline
 
@@ -512,9 +538,19 @@ playing, and resizes. Counters (HW §5.8, EL §6.2): late refills (channel
 already running on entry), the mixer's longest run, and its share of
 core 0.
 
+**The OPL emulator** is the build's choice, `PICOCALC_QUEST_OPL`, set as
+upstream's `opl_driver` default for every engine (the Gob launcher's own
+`auto` removed). In Fate of Atlantis's intro (M5, 36,621 Hz): MAME's,
+which `auto` picks for OPL2, took **45–55 %** of core 0 with a longest half
+of 10.8 ms; DOSBox's took **13–18 %** and 4.4 ms. The owner heard MAME's
+as a little softer and better, DOSBox's as not bad, and chose by CPU:
+**DOSBox is the default**, MAME's a build option, to come back if M8's SRAM
+placement brings its cost down. SCI asks for a dual OPL2 in stereo, which
+only DOSBox's emulates anyway.
+
 If the mixer costs too much, the levers in order: put the mixer, the rate
 converter and the OPL emulator in SRAM (§16, M8); a lower mixer rate (TOP
-4095 with oversample 3 is 24.4 kHz); upstream's cheaper OPL core.
+4095 with oversample 3 is 24.4 kHz).
 
 ---
 
@@ -530,8 +566,15 @@ and release, canonicalised shifted releases, and the translation to the
 engine's codes (HW §6.2). That is a change from the first plan, which put
 the held set on core 1: the pointer (§9.3) reads the held set on core 0,
 so one owner there is simpler, and the map is pure code with a host test. Auto-repeat arrives
-from the MCU as extra presses; they are kept, flagged as repeats, because
-typing in a parser game wants them and the pointer does not.
+from the MCU as extra presses; the map flags them as repeats, and the
+poll drops them: upstream's event manager makes its own repeats of a held
+key (400 ms, then every 100 ms), as ScummVM does on every platform, so
+typing repeats anyway. Passed on, the MCU's doubled them and restarted
+that timer, and SCI0, which takes a second press of an arrow as stop,
+walked Roger in fits (found in M5). The event manager's own repeats did
+the same, so it is patched to repeat no arrow and no diagonal (Home, End,
+Page Up, Page Down): a held arrow is one press, and a menu is stepped
+through by taps. Every other key repeats, for typing.
 
 On core 0, the patched `cabal_poll_event()` (§5.3) pops the queue and the
 pointer state (§9.3) and returns `CabalEvent`s: key down and up with
@@ -1138,6 +1181,15 @@ on the test card. **Measured**: mixer cost per half with each engine's
 music; late refills over ten minutes (zero expected); core 0 busy share
 again against the gate.
 
+**Done** 2026-10-29 (`milestones.md`). Every engine by ear, Full Throttle
+among them; Gob CD music absent (CD audio, deferred, §19). Longest half
+7.8 ms of 14.0; late refills 0 in every title but Full Throttle, whose
+iMUSE holds its mutex across card reads (163 ms at a scene change; M8). The
+gate with audio: every title under 75 % but Space Quest IV (86–94 % in
+play: the screen copy, then two OPL2s; M8). Found: upstream's `lockMutex()`
+could leave the audio IRQ masked for good (§8.2); key repeats walked SCI's
+ego in fits (§9.1).
+
 ### M6: Pointer and full input
 
 - The pointer (§9.3): motion, Ctrl nudges, the buttons, Alt+M, per-engine
@@ -1184,6 +1236,13 @@ In measured steps, each against a control build in the same sitting
    the PC over SWD (HW §9.2, §9.8; each tier in its own build directory,
    symbols checked with `nm`).
 3. Flash at 75 MHz, qualified for data integrity first (§11.4).
+4. From M5: copy only the changed part of the game's screen into a frame
+   (Space Quest IV spends 26 % of core 0 in that one 64 KB copy, at 20–22
+   frames a second, and is over the gate with audio); SCI's AdLib as one
+   mono OPL2 in place of two; MAME's OPL again, if tier 2 brings its cost
+   down. And two faults: Full Throttle's iMUSE holding its mutex, so the
+   audio IRQ, across card reads (163 ms); a SMUSH frame drawn sheared at a
+   scene change.
 
 Then a **30-minute soak** on battery, one title playing, keys typed over
 the UART for the whole run, with a script checking the log: one boot,
@@ -1221,7 +1280,7 @@ Every value the port depends on that has not been checked on this hardware
 | SD at 25 MHz on `spi0` with upstream's driver | works | mounted and read through M3, two games launched | high | Confirmed 2026-10-29 |
 | F6–F10 codes `0x86`–`0x90` | F7–F9 = `0x87`–`0x89` | observed, M3 | high | Confirmed 2026-10-29 |
 | Ctrl+Alt+Del delivered by the MCU | yes | used on the keyboard by the owner, M3 | high | Confirmed 2026-10-29 |
-| Mixer half fits 14 ms with OPL at 300 MHz | yes | MAME's OPL2 at 44,100 Hz took 48 % of core 0 in Fate of Atlantis's intro (M4, silent mixer) | low | M5, at the design's 36,621 Hz and with each engine's OPL emulator |
+| Mixer half fits 14 ms with OPL at 300 MHz | yes, with DOSBox's OPL | longest half 7.8 ms over every engine (M5); MAME's 10.8 ms in one intro | high | Confirmed 2026-10-29 |
 | PSRAM frame read cost | hidden behind the wire; 6 % of core 0 by DMA | measured, M2 (§7.3) | high | Confirmed 2026-10-29; M8 measures under engines |
 | UF2 Loader's app partition holds 3.6 MB | yes | not checked | low | M9 |
 | POWMAN timer unaffected by the move to 300 MHz | yes | read either side of the switch, M1 | high | Confirmed 2026-10-29 |
@@ -1237,7 +1296,7 @@ Every value the port depends on that has not been checked on this hardware
 |---|---|---|
 | 300 MHz is too slow for SCUMM v6/v7 or SCI1.1 with music | Games run slow, audio late | Gate at M4: the engines passed (14–54 %) once upstream's screen copies went; music synthesis is the cost now (OPL, 48 % in one title at 44,100 Hz), M5's to bring down; levers in M8; a higher clock as a last, explicit decision |
 | XIP cache contention between engine code, PSRAM data and the presenter | Core 0 slower than upstream's single-core numbers suggest | Measure read strategies in M2; SRAM placement in M8 |
-| Mixer IRQ held off by `lockMutex` longer than a half | Clicks | Late-refill counter; ring resized in M5 |
+| Mixer IRQ held off by `lockMutex` longer than a half | Clicks | Late-refill counter (M5: 0 in every title but Full Throttle, whose iMUSE reads the card under its mutex, 163 ms; M8) |
 | Keyboard pointer too clumsy for pixel-hunting games | Poor play | Acceleration plus Ctrl nudges; owner play-test in M6; settings |
 | Upstream changes files we patch | Patch rejects on a bump | Small patch, shims first, `check_sources.sh`; bump deliberately |
 | A game needs a key the MCU cannot send | Unplayable title | Key-map host test; Alt-layer bindings where needed |
@@ -1271,5 +1330,11 @@ Every value the port depends on that has not been checked on this hardware
   at 100 % until a key comes; upstream's on every platform. A short sleep
   after several such tests without the game advancing would fix it. M8, or
   sooner if battery life shows it.
+- **CD-audio music** (found in M5). The CD releases of the Gob games keep
+  their music as CD tracks; upstream's CD manager is an empty stub and
+  builds no compressed-audio decoder, so they play effects and no music.
+  The owner deferred it; it would take a track-file player and a decoder.
+- **Full Throttle's iMUSE mutex across card reads** and **a SMUSH picture
+  fault** at a scene change (both found in M5). M8, by the owner's choice.
 - **SCI games share one config domain**, `quest-sci`, so one SCI game's
   saves can overwrite another's (found in M4; AGI's are fixed). M7.

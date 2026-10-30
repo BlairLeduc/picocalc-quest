@@ -970,6 +970,15 @@ An **OPL2 emulator** costs far more. MAME's YM3812 core, generating at
 PC samples on a Plus 2 W (2026-10-29, development build, the output thrown
 away). The cost is per output sample, so it falls with the rate.
 
+Measured as the whole refill interrupt (the mixer, its rate converters and
+the OPL emulator, all running from flash) at 36,621 Hz, on a Plus 2 W at
+300 MHz, 2026-10-29, development build, playing through the PWM output of
+§5.9, the same game intro: MAME's YM3812 core took **45–55 %** of core 0,
+with a longest 512-frame refill of 10.8 ms; ScummVM's DOSBox OPL core took
+**13–18 %**, longest refill 4.4 ms. A game asking for two OPL2 chips in
+stereo (DOSBox only) took **36–44 %**. By ear MAME's sounded a little
+softer, DOSBox's not bad.
+
 For the foreground-to-IRQ handoff, a **lock-free SPSC queue per voice** (one
 reserved slot so full and empty are distinguishable) removes almost all critical
 sections; the few instructions that touch shared voice state go inside
@@ -1031,6 +1040,46 @@ Left/right/stereo/mute operation passed physical listening checks on a Plus 2 W.
 A phone app reported approximately **439 Hz** for a 440 Hz test tone; calibration
 and resolution were not recorded. This does not measure the PWM carrier,
 analog frequency response or waveform fidelity.
+
+### 5.9 12 bits at 300 MHz, with the mixer in the refill interrupt
+
+Measured on a Plus 2 W at 300 MHz and 1.20 V, 2026-10-29, development build,
+playing ScummVM-derived game audio (OPL music, digitised speech and effects).
+
+- **TOP 4095, divider 1, oversample 2** gives a 73.2 kHz carrier, 12 bits,
+  and 300,000,000 / 8,192 = **36,621.09 samples a second**. Music, speech
+  and effects sounded right by ear, at the right pitch and speed, through
+  the PicoCalc's speakers. Gain: a signed 16-bit sample shifted right by 4
+  about the mid-point (2,048) fills the 12 bits exactly.
+- **Ring:** two halves of 512 frames (1,024 compare words each, 8 KB in
+  all, aligned to 8 KB, with the read wrap of §5.3), so a refill every
+  **14.0 ms**: 71.5 interrupts a second, as measured.
+- **The producer can be the refill interrupt itself**: the handler calls
+  the mixer for 512 frames, converts, and re-arms. Over some 90 minutes
+  of play across six game engines, with the DOSBox OPL core, the longest
+  refill was 7.8 ms; with nothing playing a refill takes 0.1–0.4 ms.
+- **The late path, forced**, with these 14 ms halves: core 0's interrupts
+  masked for 30 ms every 5 s through continuous music cost **2.8 late
+  refills a stall** (26 over about 9 stalls), no interrupt storm, and
+  70–73 refills a second around each stall; playback carried on each time.
+  The same recovery as §5.8's 3.5 ms halves.
+- **Masking a single interrupt in the NVIC is not immediate without a
+  barrier** (Cortex-M33; inferred, not measured directly). Code that
+  cleared the refill interrupt's enable bit and then, in the next few
+  instructions, recorded that it had done so, sometimes ran the interrupt
+  in between: the handler, taking the same lock, saw the bit already clear
+  and recorded "was disabled", and the interrupt was never enabled again.
+  Two runs of three hit it within three minutes of one game's music. A
+  `DSB` and `ISB` after the write to `NVIC_ICER`, and handler code that
+  never touches the lock's saved state, ended it: nine runs of two minutes,
+  none. The symptom on this hardware is distinctive: with the interrupt
+  dead and the DMA running, the ring's last 28 ms repeat for ever (§5.3),
+  until something enables the interrupt or the board is power cycled.
+- **A long critical section is a long stall.** If thread code masks the
+  refill interrupt to protect shared mixer state, every lock held across
+  card I/O stops the audio: one game engine read a sound from the SD card
+  under its mutex and held the interrupt off for **163 ms**, three late
+  refills, at a scene change.
 
 ---
 

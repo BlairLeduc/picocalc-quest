@@ -16,6 +16,7 @@
 #include "log.h"
 #include "page.h"
 #include "picocalc_input.h"
+#include "sound.h"
 #include "southbridge.h"
 #include "video.h"
 
@@ -197,6 +198,7 @@ void core1_main(void) {
     uint32_t last_pub = 0, last_drop = 0, last_presents = 0, last_delay = g_core0_delay_us;
     uint32_t last_update = g_core0_update_us, last_updates = g_core0_updates;
     uint32_t last_taken = 0, last_wait = 0;
+    uint32_t last_mix = g_sound.mix_us, last_halves = g_sound.halves;
     for (;;) {
         log_pump();
         loops++;
@@ -258,6 +260,9 @@ void core1_main(void) {
             uint32_t pub, drop, delay = g_core0_delay_us;
             uint32_t update = g_core0_update_us, updates = g_core0_updates;
             uint32_t taken = g_input_taken, wait = g_input_wait_sum_us;
+            uint32_t mix = g_sound.mix_us, halves = g_sound.halves;
+            uint32_t mix_max = g_sound.mix_max_us;
+            g_sound.mix_max_us = 0;
             video_counts(&pub, &drop);
             /* Core 0's busy share: the second's wall time not in
              * cabal_delay (§14.3), in thousandths. */
@@ -265,7 +270,10 @@ void core1_main(void) {
             uint32_t busy = idle >= HEARTBEAT_US ? 0 : 1000u - idle / (HEARTBEAT_US / 1000u);
             /* Of the second, the share in upstream's screen update. */
             uint32_t upd = (update - last_update) / (HEARTBEAT_US / 1000u);
-            printf("hb %lu: core 0 busy %lu.%lu%%, update %lu.%lu%% in %lu calls, frames %lu, presented %lu, dropped %lu, "
+            /* And in the audio IRQ, which the busy share includes (§8.3). */
+            uint32_t mixed = (mix - last_mix) / (HEARTBEAT_US / 1000u);
+            printf("hb %lu: core 0 busy %lu.%lu%%, update %lu.%lu%% in %lu calls, "
+                   "audio %lu.%lu%% in %lu halves (max %lu us), late %lu, frames %lu, presented %lu, dropped %lu, "
                    "present %lu us (max %lu), publish max %lu us, core 1 stack %lu B; "
                    "keys %lu (wait mean %lu max %lu us), ring full %lu, unknown %lu, "
                    "stray %lu; temp %d C, battery %d%%%s, i2c errors %lu, log dropped %lu, "
@@ -273,6 +281,9 @@ void core1_main(void) {
                    (unsigned long)seconds, (unsigned long)(busy / 10u),
                    (unsigned long)(busy % 10u), (unsigned long)(upd / 10u),
                    (unsigned long)(upd % 10u), (unsigned long)(updates - last_updates),
+                   (unsigned long)(mixed / 10u), (unsigned long)(mixed % 10u),
+                   (unsigned long)(halves - last_halves), (unsigned long)mix_max,
+                   (unsigned long)g_sound.late,
                    (unsigned long)(pub - last_pub),
                    (unsigned long)(s_present.presents - last_presents),
                    (unsigned long)(drop - last_drop), (unsigned long)s_present.last_us,
@@ -293,6 +304,8 @@ void core1_main(void) {
             last_updates = updates;
             last_taken = taken;
             last_wait = wait;
+            last_mix = mix;
+            last_halves = halves;
             loops = 0;
         }
 
