@@ -89,6 +89,7 @@ typedef struct {
     uint16_t keycode;   /* KM_KEY_*, or the lowercase ASCII          */
     uint16_t ascii;     /* as ScummVM's SDL backend would give it    */
     uint8_t  flags;     /* KM_MOD_*, as they were at the press       */
+    uint8_t  key;       /* the physical key, keymap_physical()'s name */
 } km_event_t;
 
 typedef enum {

@@ -4,6 +4,97 @@ What each milestone verified, on which board, on what date, and what was
 not checked, newest first. `design.md` §16 holds each milestone's scope
 and done-when criteria; this file keeps the full record.
 
+**M6 (pointer and full input) is done**, on 2026-10-30, on the same
+Pimoroni Pico Plus 2 W in a PicoCalc, flashed over SWD, with Arm GCC
+15.2.Rel1 and SDK 2.3.1, development build. The owner played the first
+scene of a point-and-click title in every engine, and typed into a parser
+game in each mode, with the PicoCalc's keyboard alone. **D8 is settled as
+proposed**: the owner kept `]` left and `[` right, and the curve as first
+set ("movement feels natural").
+
+- **The pointer** (`picocalc/pointer.c`, §9.3): one pixel on the press,
+  then 40 px/s rising to 240 px/s over 600 ms, integrated from each key's
+  read time, each axis on its own; Ctrl+arrow one pixel. Deltas through
+  `ps2_mouse_get_state()`, which upstream's poll already read: upstream
+  keeps the place and the clamp, so no screen size is needed here.
+- **Routing** (`picocalc/input_shim.c`): each key's destination (engine,
+  pointer, Alt+M) fixed at its press and kept to its release. AGI starts in
+  keys mode, the rest in pointer mode; the selector gets every key.
+- **The status band** (`picocalc/status.c`, §7.4): the mode and a line of
+  help when a game starts and on Alt+M. The owner found 2 s too short; now
+  4 s.
+- **The patch** (still ten files): one hunk in `frank_quest_main.cpp` sets
+  the engine's mode around each launch.
+- **Host:** `test_pointer`: the curve, the same pixels at 1, 17 and 250 ms
+  a poll, a tap, both axes and opposites, nudges, the ±127 clamp with the
+  rest kept, events read before the last poll, the timer's wrap. Alt+M
+  joins the chord table `test_keymap` checks. Also `test_sof_to_sou`, for
+  a converter written on the way (below).
+
+**Checked on the board** (UART logs `out/m6-*.log`, not committed):
+
+- **By the owner, keyboard only**: Day of the Tentacle (the first SCUMM v6
+  title on the board; speech, picking up and looking at an object); Fate
+  of Atlantis (the ticket agent, walking, the fight with the doorman);
+  Kyrandia (speech, talking, picking up, giving); Gobliiins (selecting and
+  moving each goblin; effects only, its music being CD audio, deferred);
+  Space Quest IV (menus, the icon bar, the inventory).
+- **Typing in each mode**: Space Quest III (`look`, walking with the arrows
+  and with the pointer); King's Quest III (walking and typing in keys mode,
+  then the pointer after Alt+M).
+- **By UART** (`keys.sh`), in Fate of Atlantis: Right held 1.0 s, 181 px;
+  Down 0.3 s, 30 px; Ctrl+Left twice, one pixel each; Alt+M both ways, an
+  arrow in keys mode reaching the engine as a key.
+- 7 launches ended cleanly; the PSRAM heap 263,808 B at all 8 selector
+  entries; strays only the releases of the Enter that launched a game and
+  the Del of Ctrl+Alt+Del, after the flush.
+
+**Measured** (development build):
+
+- **Pointer travel**: 320 px in **1.58 s** from the press (the curve, in
+  the host test; on the board, the held times logged give the curve's
+  pixels).
+- **Key to pointer motion**, from core 1's read of the key to the first
+  delta given to the engine, 756 presses: median **7.3 ms**, 90th
+  percentile 24.5 ms; 19 over 50 ms, the longest 223 ms, while the engine
+  was not polling (loading, scene changes). Before core 1's read, up to
+  25 ms in the MCU's FIFO (§9.1).
+- **The gate with the pointer in play** (`gate.sh`, busiest 5 s):
+
+| Title | Busy, median / busiest 5 s | Frames/s then | Longest refill |
+|---|---:|---:|---:|
+| Day of the Tentacle | 32 / 62 | 10 | 8.6 ms |
+| Fate of Atlantis | 25 / 74 | 32 | 7.2 ms |
+| **Kyrandia** | 37 / **88** | 55 | 8.7 ms |
+| **Gobliiins** | 76 / **89** | 26 | 0.5 ms |
+| **Space Quest IV** | 76 / **100** | 2 | 7.6 ms |
+| Space Quest III | 34 / 53 | 20 | 5.7 ms |
+| King's Quest III | 16 / 36 | 30 | 1.0 ms |
+
+  Late refills 0 in every title. **Kyrandia and Gobliiins now fail** (M5:
+  69 and 22, measured with little moving): a moving cursor redraws, and
+  each redraw is the 64 KB screen copy M8 already has to cut (M5's SQ4
+  finding). The longest refill, 8.7 ms of 14.0, is a new high.
+
+**Found:**
+- **A card pulled during a game** gave upstream's "not accessible" and an
+  empty selector, not the no-card page; putting it back restarted as it
+  should. For M7.
+- The owner tried the buttons the other way round at first, then kept them
+  as they are.
+- `scripts/sof_to_sou.py`: a FLAC-compressed SCUMM speech file
+  (`monster.sof`) back to the `monster.sou` this build plays, since it has
+  no FLAC, Vorbis or MP3 decoder. Byte for byte on a made-up file; not run
+  on a real one (the owner found the CD's `.sou`).
+- Nothing new about the PicoCalc's hardware: no entry in the hardware
+  notes.
+
+**Not checked:** Ctrl+arrow from the PicoCalc's own keyboard (every one of
+the owner's 2,147 arrow presses was plain; the UART's were Ctrl); dragging
+(no title on the card needs it); the 4 s band, by the owner; the release
+build on the board; rebinding from `picocalc.ini` (M7); Day of the
+Tentacle's Maniac Mansion (upstream's launcher has no game list for it).
+
 **M5 (audio) is done**, on 2026-10-29, on the same Pimoroni Pico Plus 2 W
 in a PicoCalc, flashed over SWD, with Arm GCC 15.2.Rel1 and SDK 2.3.1,
 development build. Music, speech and effects checked by ear by the owner in

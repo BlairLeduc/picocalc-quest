@@ -9,6 +9,8 @@
 #ifndef PICOCALC_QUEST_PAGE_H
 #define PICOCALC_QUEST_PAGE_H
 
+#include <stdint.h>
+
 typedef enum {
     PAGE_NONE = 0,
     PAGE_NO_PSRAM,     /* the PSRAM failed its check (§11.3)      */
@@ -31,5 +33,10 @@ void page_show_message(page_t p, const char *message);
 /* Core 1: the page core 0 asked for, and drawing it. */
 page_t page_wanted(void);
 void page_draw(page_t p);
+
+/* Core 1: one line of text at y, centred, FONT_H rows of pixels, over a
+ * full-width background; longer than the panel is cut. For the status
+ * band too (status.h). */
+void page_line(unsigned y, const char *s, uint16_t fg, uint16_t bg);
 
 #endif /* PICOCALC_QUEST_PAGE_H */

@@ -103,7 +103,7 @@ on them.
 | D5 | 2026-10-29 | Ship at **300 MHz**, core rail 1.20 V, not upstream's 504 MHz at 1.65 V (§11). | Proposed; confirmed or revised at the M4 gate |
 | D6 | 2026-10-29 | Reuse the PicoCalc drivers from `pico-oric` (same author, GPL-3.0) by copy, rename, re-verify (EL §14.6). | Proposed |
 | D7 | 2026-10-29 | Licence the port GPL-3.0-or-later. Upstream's own code is GPL-3.0-or-later and its ScummVM code GPL-2.0-or-later, so the combination can only go out under GPL-3.0. | Proposed |
-| D8 | 2026-10-29 | Keyboard pointer: arrows move it; `]` is the left button and `[` the right; **Alt+M** switches the arrows between pointer and arrow keys; each engine has a default mode (§9). | Proposed; settled by play-testing in M6 |
+| D8 | 2026-10-29 | Keyboard pointer: arrows move it; `]` is the left button and `[` the right; **Alt+M** switches the arrows between pointer and arrow keys; each engine has a default mode (§9). | Settled in M6 by the owner's play-testing, as proposed |
 | D9 | 2026-10-29 | Keep upstream's quit-to-selector chord, Ctrl+Alt+Del, if the keyboard MCU delivers it (§9.5). | Settled 2026-10-29: delivered, used by the owner in M3 |
 | D10 | 2026-10-29 | No internal flash writes. Settings and saves live on the card (HW §7.1, EL §8.7). | Proposed |
 | D11 | 2026-10-29 | Work with the PicoCalc shell as Rogue does: leave to the shell (or UF2 Loader's menu) through `picocalc_shell.h`, and take the date and time from the clock the shell keeps (§13). | Settled |
@@ -455,10 +455,13 @@ presenting (§16, M8) is an optimisation, not a requirement.
 ### 7.4 The status band
 
 The 40-row bands above and below are outside anything upstream draws. The
-bottom band shows the input mode (`POINTER` or `KEYS`, §9.3) for two
-seconds after it changes, and transient messages (card missing, save
-written). It is drawn by core 1 only when its text changes (EL §5.4), with
-the starter kit's 8×10 font. It is not a perf line in release builds.
+bottom band shows the arrows' mode (§9.3) for four seconds when a game
+starts and when Alt+M changes it, as a title and a line of help ("Arrows:
+pointer (Alt+M: keys)" over the buttons and the nudge), and later
+transient messages (card missing, save written). Core 0 names the text
+(`status.h`); core 1 draws it only when it changes (EL §5.4), with the
+starter kit's 8×10 font, and clears it when its time is up. It is not a
+perf line in release builds.
 
 ---
 
@@ -635,12 +638,26 @@ arrows drive one:
   both; they start in pointer mode. The status band names the mode when it
   changes (§7.4).
 
-The pointer is clamped to the game surface. Upstream draws the cursor into
-the frame on core 0, so the presenter needs nothing for it.
+Each axis accelerates on its own (Right held, then Up added, starts Up
+from rest), and opposite arrows cancel. The curve is integrated from each
+key's read time, so the distance is the same at any poll rate: 320 px
+takes 1.58 s. The pointer (`pointer.c`, with a host test) gives deltas
+through `ps2_mouse_get_state()`, which upstream's poll already reads when
+no key is waiting; upstream keeps the absolute place, clamps it to the
+game surface, and takes an engine's warp, so the port needs no screen
+size. A delta is at most ±127, upstream's clamp; the rest comes on the
+next poll. Upstream draws the cursor into the frame on core 0, so the
+presenter needs nothing for it.
 
-D8 is proposed, not settled: the button keys and the acceleration curve
-are chosen by playing one title per engine on the device in M6, and a
-`/quest/picocalc.ini` setting can rebind them (§10.3).
+Where a key goes (the engine, the pointer, or the mode switch) is decided
+at its press and kept until its release (`input_shim.c`), so a mode change
+with an arrow or a button held cannot strand its up. The launcher sets the
+engine's mode before each game and gives every key back to the selector
+after it (one hunk in `frank_quest_main.cpp`).
+
+D8 was settled in M6 by playing one title per engine on the device: the
+owner kept the buttons and the curve as proposed. A `/quest/picocalc.ini`
+setting can rebind them (§10.3, M7).
 
 ### 9.4 Typing
 
@@ -1201,6 +1218,13 @@ ego in fits (§9.1).
 title per engine using only the PicoCalc keyboard, and types a command into
 a parser game in each mode. **Measured**: pointer travel time across the
 screen; key-to-cursor latency.
+
+**Done** 2026-10-30 (`milestones.md`). A point-and-click title per engine
+by the owner, Day of the Tentacle the first SCUMM v6 on the board; typing
+in Space Quest III and King's Quest III in both modes. D8 kept as
+proposed; the band's time raised to 4 s. 320 px in 1.58 s; key to motion
+median 7.3 ms. With the pointer moving, Kyrandia and Gobliiins join Space
+Quest IV over the gate (88–100 %): the screen copy, M8.
 
 ### M7: Saves, settings, quit and exit
 

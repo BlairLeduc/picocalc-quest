@@ -70,8 +70,7 @@ page_t page_wanted(void) {
     return s_wanted;
 }
 
-/* One line of text, centred, ten rows of pixels. */
-static void draw_line(unsigned y, const char *s, uint16_t fg, uint16_t bg) {
+void page_line(unsigned y, const char *s, uint16_t fg, uint16_t bg) {
     unsigned n = (unsigned)strlen(s);
     if (n > COLS) n = COLS;
     unsigned x0 = (LCD_PANEL_W - n * FONT_W) / 2u;
@@ -101,9 +100,9 @@ void page_draw(page_t p) {
 
     const page_text_t *t = &s_pages[p];
     unsigned y = TOP;
-    draw_line(y, "picocalc-quest", RGB565(128, 128, 128), bg);
+    page_line(y, "picocalc-quest", RGB565(128, 128, 128), bg);
     y += 2u * FONT_H;
-    draw_line(y, t->title, RGB565(255, 200, 0), bg);
+    page_line(y, t->title, RGB565(255, 200, 0), bg);
     y += 2u * FONT_H;
     /* The message, broken at spaces into lines of at most COLS, at
      * most MESSAGE_LINES of them. */
@@ -120,12 +119,12 @@ void page_draw(page_t p) {
         char line[COLS + 1];
         memcpy(line, m, len);
         line[len] = '\0';
-        draw_line(y, line, RGB565(255, 255, 255), bg);
+        page_line(y, line, RGB565(255, 255, 255), bg);
         y += FONT_H + 2u;
         m += len;
     }
     for (unsigned i = 0; i < sizeof t->lines / sizeof t->lines[0] && t->lines[i]; i++) {
-        draw_line(y, t->lines[i], RGB565(255, 255, 255), bg);
+        page_line(y, t->lines[i], RGB565(255, 255, 255), bg);
         y += FONT_H + 2u;
     }
 }

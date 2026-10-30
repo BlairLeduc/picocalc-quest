@@ -137,8 +137,10 @@ else()
         picocalc/log.c
         picocalc/main.c
         picocalc/page.c
+        picocalc/pointer.c
         picocalc/psram_check.c
         picocalc/southbridge.c
+        picocalc/status.c
         picocalc/syscalls.c
         picocalc/video_shim.c
     )

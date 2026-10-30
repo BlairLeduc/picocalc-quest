@@ -18,6 +18,7 @@
 #include "picocalc_input.h"
 #include "sound.h"
 #include "southbridge.h"
+#include "status.h"
 #include "video.h"
 
 /* The battery is refreshed by the MCU every 20 s (hardware-notes.md §6);
@@ -234,6 +235,9 @@ void core1_main(void) {
             if (PICOCALC_QUEST_FB_READ != FB_READ_NONE) present(frame);
             video_release(frame);
         }
+
+        /* The status band (§7.4), drawn only when it changes. */
+        status_service(time_us_32(), page != PAGE_NONE || !bands_cleared);
 
         /* The keyboard (§9.1): the MCU's FIFO every KBD_POLL_US, and in
          * the development build the UART's keys every loop (§14.1). */
