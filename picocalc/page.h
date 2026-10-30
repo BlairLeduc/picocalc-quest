@@ -1,5 +1,6 @@
 /* page.h — the pages shown in place of the selector when something it
- * needs is missing (design.md §13.1, EL §8.1): never a blank screen.
+ * needs is missing (design.md §13.1, EL §8.1): never a blank screen;
+ * and on the way out of it (§13.3).
  *
  * Core 0 finds the failure and names the page; core 1, which owns the
  * LCD, draws it over the whole panel in the 8x10 font and leaves it
@@ -18,6 +19,8 @@ typedef enum {
     PAGE_CARD_FAILED,  /* a card is in, but did not mount         */
     PAGE_NO_QUEST,     /* the card has no /quest                  */
     PAGE_GAME_ERROR,   /* upstream's error() ended the game       */
+    PAGE_TO_SHELL,     /* Esc in the selector, back to the shell  */
+    PAGE_POWER_OFF,    /* Esc in the selector, powering off       */
 } page_t;
 
 /* The longest message a page shows; longer is cut. */

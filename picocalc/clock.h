@@ -8,13 +8,21 @@
  * plus the time since boot, so games that read the clock still see it
  * advance.
  *
- * The calendar arithmetic is pure, and has a host test (§15).
+ * The same time stamps what is written to the card, through FatFs's
+ * get_fattime(); with no clock set, FatFs's own fixed date.
+ *
+ * The calendar arithmetic is pure, and has a host test (§15). C linkage,
+ * for upstream's OSystem, which is C++.
  */
 #ifndef PICOCALC_QUEST_CLOCK_H
 #define PICOCALC_QUEST_CLOCK_H
 
 #include <stdbool.h>
 #include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /* Broken-down local time, its fields as struct tm and ScummVM's TimeDate
  * have them. */
@@ -40,10 +48,20 @@ void clock_local(int64_t utc_ms, int offset_min, clock_tm_t *t);
 /* Upstream's made-up time: the fallback's start plus the uptime. */
 void clock_fallback(uint64_t uptime_ms, clock_tm_t *t);
 
+/* Calendar fields to FatFs's packed time stamp: years since 1980 in bits
+ * 31-25, month 1-12, day, hours, minutes, and seconds halved in 4-0.
+ * Before 1980, which FAT cannot hold, is 1980-01-01 00:00:00; after
+ * 2107, the end of 2107. */
+uint32_t clock_fattime(const clock_tm_t *t);
+
 #ifndef PICOCALC_QUEST_HOST
 /* Local time now. Returns true when it is the shell's clock, false when
  * it is the fallback. */
 bool picocalc_clock_now(clock_tm_t *t);
+#endif
+
+#ifdef __cplusplus
+}
 #endif
 
 #endif /* PICOCALC_QUEST_CLOCK_H */

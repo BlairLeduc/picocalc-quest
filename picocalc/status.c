@@ -15,13 +15,19 @@
 #define BAND_H 40u
 
 static const char *volatile s_title, *volatile s_help;
+static volatile uint32_t s_us;
 static volatile uint32_t s_seq;
 
-void status_show(const char *title, const char *help) {
+void status_show_for(const char *title, const char *help, uint32_t us) {
     s_title = title;
     s_help = help;
+    s_us = us;
     __dmb();
     s_seq++;
+}
+
+void status_show(const char *title, const char *help) {
+    status_show_for(title, help, STATUS_SHOW_US);
 }
 
 void status_service(uint32_t now_us, bool covered) {
@@ -44,7 +50,7 @@ void status_service(uint32_t now_us, bool covered) {
         lcd_fill(0, BAND_Y, LCD_PANEL_W, BAND_H, bg);
         page_line(BAND_Y + 5u, title ? title : "", RGB565(255, 200, 0), bg);
         page_line(BAND_Y + 5u + FONT_H + 4u, help ? help : "", RGB565(160, 160, 160), bg);
-        until = now_us + STATUS_SHOW_US;
+        until = now_us + s_us;
         shown = true;
     } else if (shown && (int32_t)(now_us - until) >= 0) {
         lcd_fill(0, BAND_Y, LCD_PANEL_W, BAND_H, 0);

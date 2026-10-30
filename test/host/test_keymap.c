@@ -138,7 +138,9 @@ static void test_retranslated_releases(void) {
     feed(MCU_RELEASED, MCU_SHIFT_R, NULL);
     expect(feed(MCU_RELEASED, '1', &e), &e, false, false, '!', '!', KM_MOD_SHIFT, "1 up is !'s up");
 
-    /* The keys that exist only as alternates: Home is Shift+Tab, and so on. */
+    /* The keys that exist only as alternates: Home is Shift+Tab, and so on,
+     * each without the Shift that reaches it (M7: SCI took Shift+F7 for
+     * another key). */
     static const struct { uint8_t press, release; int keycode; } alt[] = {
         { MCU_HOME, MCU_TAB, KM_KEY_HOME },       { MCU_END, MCU_DEL, KM_KEY_END },
         { MCU_PGUP, MCU_UP, KM_KEY_PAGEUP },      { MCU_PGDN, MCU_DOWN, KM_KEY_PAGEDOWN },
@@ -148,13 +150,21 @@ static void test_retranslated_releases(void) {
     for (unsigned i = 0; i < sizeof alt / sizeof alt[0]; i++) {
         keymap_reset(&g_km);
         feed(MCU_PRESSED, MCU_SHIFT_L, NULL);
-        CHECK(feed(MCU_PRESSED, alt[i].press, &e) == KM_EVENT && e.keycode == alt[i].keycode,
-              "0x%02x: down %d", alt[i].press, e.keycode);
+        CHECK(feed(MCU_PRESSED, alt[i].press, &e) == KM_EVENT && e.keycode == alt[i].keycode &&
+                  e.flags == 0,
+              "0x%02x: down %d flags %d", alt[i].press, e.keycode, e.flags);
         feed(MCU_RELEASED, MCU_SHIFT_L, NULL);
         CHECK(feed(MCU_RELEASED, alt[i].release, &e) == KM_EVENT && !e.down &&
                   e.keycode == alt[i].keycode,
               "0x%02x released as 0x%02x: up %d", alt[i].press, alt[i].release, e.keycode);
     }
+
+    /* Ctrl stays: only the modifier that reaches the key goes. */
+    keymap_reset(&g_km);
+    feed(MCU_PRESSED, MCU_CTRL, NULL);
+    feed(MCU_PRESSED, MCU_SHIFT_L, NULL);
+    expect(feed(MCU_PRESSED, MCU_F1 + 6, &e), &e, true, false, KM_KEY_F1 + 6, KM_ASCII_F1 + 6,
+           KM_MOD_CTRL, "ctrl+shift+F2 is ctrl+F7");
 }
 
 static void test_insert(void) {
@@ -165,12 +175,12 @@ static void test_insert(void) {
     keymap_reset(&g_km);
     feed(MCU_PRESSED, MCU_ALT, NULL);
     expect(feed(MCU_PRESSED, MCU_INSERT, &e), &e, true, false, KM_KEY_INSERT, KM_KEY_INSERT,
-           KM_MOD_ALT, "alt+i");
+           0, "alt+i, without the Alt that reaches it");
     feed(MCU_RELEASED, MCU_ALT, NULL);
-    expect(feed(MCU_PRESSED, 'i', &e), &e, true, true, KM_KEY_INSERT, KM_KEY_INSERT, KM_MOD_ALT,
+    expect(feed(MCU_PRESSED, 'i', &e), &e, true, true, KM_KEY_INSERT, KM_KEY_INSERT, 0,
            "i repeat");
     expect(feed(MCU_RELEASED, 'i', &e), &e, false, false, KM_KEY_INSERT, KM_KEY_INSERT,
-           KM_MOD_ALT, "i up");
+           0, "i up");
     CHECK(feed(MCU_RELEASED, MCU_ENTER, NULL) == KM_STRAY, "Enter was never down");
 
     /* Alt+I released under Alt, as Insert. */
@@ -178,14 +188,14 @@ static void test_insert(void) {
     feed(MCU_PRESSED, MCU_ALT, NULL);
     feed(MCU_PRESSED, MCU_INSERT, NULL);
     expect(feed(MCU_RELEASED, MCU_INSERT, &e), &e, false, false, KM_KEY_INSERT, KM_KEY_INSERT,
-           KM_MOD_ALT, "insert up under alt");
+           0, "insert up under alt");
 
     /* Shift+Enter is Insert on Enter's key. */
     keymap_reset(&g_km);
     feed(MCU_PRESSED, MCU_SHIFT_L, NULL);
     feed(MCU_PRESSED, MCU_INSERT, NULL);
     expect(feed(MCU_RELEASED, MCU_INSERT, &e), &e, false, false, KM_KEY_INSERT, KM_KEY_INSERT,
-           KM_MOD_SHIFT, "insert up under shift");
+           0, "insert up under shift");
     CHECK(feed(MCU_RELEASED, 'i', NULL) == KM_STRAY, "I was never down");
 }
 

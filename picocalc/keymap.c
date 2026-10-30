@@ -153,6 +153,14 @@ km_result_t keymap_feed(keymap_t *km, uint8_t state, uint8_t code, km_event_t *o
      * down from here. A modifier counts in its own flags. */
     h->down = true;
     h->flags = keymap_mods(km);
+    /* A key the PicoCalc has only as another's alternate (F6-F10, Home,
+     * End, Page Up and Down, Break, Insert) comes without the modifier
+     * that reaches it: the engine wants F7, not Shift+F7, which SCI
+     * takes for another key (found in M7). Shifted punctuation keeps its
+     * Shift, as SDL gives it. */
+    if (code >= 0x80u && phys != code) {
+        h->flags &= (uint8_t)~(code == MCU_INSERT && phys != MCU_ENTER ? KM_MOD_ALT : KM_MOD_SHIFT);
+    }
     translate(code, h->flags, &h->keycode, &h->ascii);
     *out = (km_event_t){ true, false, h->keycode, h->ascii, h->flags, phys };
     return KM_EVENT;

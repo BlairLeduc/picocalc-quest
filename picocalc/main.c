@@ -5,9 +5,9 @@
  * the banner; core 1, which brings up the southbridge and the LCD and
  * draws the test pattern; PSRAM, checked before the heap goes on it
  * (§11.3); the frame pool, which core 1 presents from (§7.2); the card,
- * mounted and checked for /quest (§10); then upstream's cabal_init() and
- * cabal_main(). A failure on the way shows a page naming it (page.h).
- * Audio comes in M5 (§16).
+ * mounted and checked for /quest (§10); the settings (§10.3); then
+ * upstream's cabal_init() and cabal_main(). A failure on the way shows a
+ * page naming it (page.h).
  */
 
 #include <malloc.h>
@@ -31,6 +31,7 @@
 #include "psram_allocator.h"
 #include "psram_check.h"
 #include "psram_init.h"
+#include "settings.h"
 #include "sound.h"
 #include "video.h"
 
@@ -38,6 +39,7 @@ void cabal_init(void);
 int cabal_main(void);
 void cabal_enable_psram_heap(void);
 void cabal_report_previous_crash(void);
+void cabal_audio_set_volume(int volume);
 
 /* Core 0's time in upstream's delay, for the heartbeat's busy share
  * (§14.3): the link wraps cabal_delay, so upstream's OSystem calls this
@@ -96,24 +98,78 @@ static void heap_report(void) {
            (unsigned long)psram.ordblks, (unsigned long)sram.uordblks);
 }
 
-/* Upstream's scan of /quest, timed for M3 (§16). The link wraps it by its C++ name, so the selector stays
- * unpatched; QuestGame is opaque here. */
-int __real__Z22frank_quest_scan_gamesP9QuestGamei(void *out, int max_out);
-int __wrap__Z22frank_quest_scan_gamesP9QuestGamei(void *out, int max_out) {
-    uint32_t t0 = time_us_32();
-    int n = __real__Z22frank_quest_scan_gamesP9QuestGamei(out, max_out);
-    printf("picocalc-quest: /quest scanned in %lu ms, %d game(s)\n",
-           (unsigned long)((time_us_32() - t0) / 1000u), n);
-    heap_report();
-    return n;
-}
-
 /* The card's state must hold this long to count: the slot is
  * push-to-eject, and its switch bounces through an insertion
  * (hardware-notes.md §7.1). */
 #define CARD_SETTLE_US 500000u
 
 void picocalc_restart(void);
+static void card_failed(page_t p);
+
+/* Upstream's scan of /quest, timed for M3 (§16), each time the selector
+ * opens. The link wraps it by its C++ name, so the selector stays
+ * unpatched; QuestGame is opaque here. A card taken out during a game
+ * gets the no-card page, not an empty selector (found in M6); one put
+ * back in the meantime is not the card FatFs mounted, so the program
+ * starts again, and the boot's checks say what is wrong if anything
+ * is. */
+int __real__Z22frank_quest_scan_gamesP9QuestGamei(void *out, int max_out);
+int __wrap__Z22frank_quest_scan_gamesP9QuestGamei(void *out, int max_out) {
+    if (!picocalc_shell_card_present()) {
+        printf("picocalc-quest: the card is out\n");
+        card_failed(PAGE_NO_CARD);
+    }
+    if (!cabal_path_exists("/quest")) {
+        printf("picocalc-quest: /quest cannot be read; starting again\n");
+        picocalc_restart();
+    }
+    uint32_t t0 = time_us_32();
+    int n = __real__Z22frank_quest_scan_gamesP9QuestGamei(out, max_out);
+    printf("picocalc-quest: /quest scanned in %lu ms, %d game(s)\n",
+           (unsigned long)((time_us_32() - t0) / 1000u), n);
+    heap_report();
+    settings_announce();
+    return n;
+}
+
+/* Every file written, timed from its open to its close, for M7's save
+ * times (§16): the link wraps upstream's open for writing and its close,
+ * so its file layer stays unpatched. A save is written between the two,
+ * so the time is the engine's as well as the card's. */
+CabalFile *__real_cabal_file_open_write(const char *path);
+void __real_cabal_file_close(CabalFile *file);
+
+static struct {
+    CabalFile *file;
+    uint32_t   t0;
+    char       path[48];
+} s_writing[4];
+
+CabalFile *__wrap_cabal_file_open_write(const char *path) {
+    uint32_t t0 = time_us_32();
+    CabalFile *f = __real_cabal_file_open_write(path);
+    for (unsigned i = 0; f != NULL && i < sizeof s_writing / sizeof s_writing[0]; i++) {
+        if (s_writing[i].file == NULL) {
+            s_writing[i].file = f;
+            s_writing[i].t0 = t0;
+            snprintf(s_writing[i].path, sizeof s_writing[i].path, "%s", path);
+            break;
+        }
+    }
+    return f;
+}
+
+void __wrap_cabal_file_close(CabalFile *file) {
+    unsigned i = 0;
+    while (i < sizeof s_writing / sizeof s_writing[0] && (file == NULL || s_writing[i].file != file)) i++;
+    uint32_t size = i < sizeof s_writing / sizeof s_writing[0] ? cabal_file_size(file) : 0;
+    __real_cabal_file_close(file);
+    if (i < sizeof s_writing / sizeof s_writing[0]) {
+        printf("picocalc-quest: wrote %s, %lu B in %lu ms\n", s_writing[i].path,
+               (unsigned long)size, (unsigned long)((time_us_32() - s_writing[i].t0) / 1000u));
+        s_writing[i].file = NULL;
+    }
+}
 
 /* Wait until the card has been `in` (or out) for CARD_SETTLE_US. */
 static void wait_for_card(bool in) {
@@ -247,9 +303,13 @@ int main(void) {
     multicore_launch_core1(core1_main);
     while (!g_core1.ready) tight_loop_contents();
     __dmb();
-    printf("  southbridge  : i2c %lu Hz, version %d, a register read %lu us%s\n",
+    printf("  southbridge  : i2c %lu Hz, version %d, a register read %lu us%s%s\n",
            (unsigned long)g_core1.i2c_hz, g_core1.sb_version, (unsigned long)g_core1.i2c_us,
+           g_core1.sb_power_off ? ", can power off" : ", cannot power off",
            g_core1.sb_version < 0 ? "; NOT ANSWERING: switch the PicoCalc off and on" : "");
+    printf("  loader       : %s\n", picocalc_shell_loader_present()
+           ? "started by UF2 Loader; Esc in the selector goes to the shell"
+           : "installed from BOOTSEL; Esc in the selector powers off");
 #if PICOCALC_QUEST_TEST_PATTERN
     printf("  lcd          : spi %lu Hz, init %lu us, test pattern %lu us\n",
            (unsigned long)g_core1.spi_hz, (unsigned long)g_core1.lcd_us,
@@ -278,6 +338,8 @@ int main(void) {
 
     video_init();
     check_card();
+    settings_load();
+    cabal_audio_set_volume(settings_gain(g_settings.volume));
 
     cabal_init();
     return cabal_main();

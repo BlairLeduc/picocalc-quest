@@ -55,6 +55,15 @@ static const page_text_t s_pages[] = {
         "",
         "Press any key to go back to the list.",
     } },
+    [PAGE_TO_SHELL] = { "Back to the shell.", {
+        "Saves stay on the card.",
+    } },
+    [PAGE_POWER_OFF] = { "Switching off.", {
+        "Saves stay on the card.",
+        "",
+        "If it is still on in ten seconds,",
+        "switch it off with its power button.",
+    } },
 };
 
 void page_show(page_t p) {

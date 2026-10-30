@@ -19,6 +19,7 @@ typedef struct {
     uint32_t      i2c_hz;        /* rate the I2C peripheral took        */
     int           sb_version;    /* -1 if the southbridge did not answer */
     uint32_t      i2c_us;        /* one register read                   */
+    bool          sb_power_off;  /* the southbridge can power off (§13.3) */
     uint32_t      spi_hz;        /* the LCD's, as configured            */
     uint32_t      lcd_us;        /* lcd_init, reset to DISPON           */
     uint32_t      pattern_us;    /* drawing the test pattern            */
@@ -39,6 +40,11 @@ extern volatile uint32_t g_core0_update_us, g_core0_updates;
  * stays stopped, so the reboot cannot catch the southbridge mid-way
  * (southbridge.h). Returns once it has, or after 100 ms. */
 void core1_park(void);
+
+/* Core 0: have the southbridge cut the power `seconds` from now (at
+ * least 6), through core 1, which owns it (§13.3). Returns once core 1
+ * has written it, or after 200 ms: true if the southbridge took it. */
+bool core1_power_off(uint8_t seconds);
 
 /* Core 0, before launching core 1: fill its stack with a pattern, so the
  * heartbeat can report how deep it has gone (§12.1). */

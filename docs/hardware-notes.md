@@ -1104,7 +1104,7 @@ bus must not hang the machine.
 | `0x0B` | `BAT` | percent in bits 0–6, **bit 7 = charging** | refreshed by the MCU every 20 s, not on demand. Bit 7 is the charger, not USB power: on a Plus 2 W on 2026-09-27 it read `100%` with bit 7 for over half an hour on USB, then `100%` without it, still on USB, once the charge finished. So bit 7 set proves USB power, and clear proves nothing |
 | `0x0C` | `C64_MTX` | 10 bytes of raw matrix bitmap | reply is longer than two bytes |
 | `0x0D` | `C64_JS` | arrows + Enter as a C64-style joystick | |
-| `0x0E` | `OFF` | — | write to power off; value is clamped to ≥6 and used as a **delay in seconds** |
+| `0x0E` | `OFF` | not 0 if the firmware can power off | write to power off; value is clamped to ≥6 and used as a **delay in seconds**. Seen working on a Plus 2 W on 2026-10-30, firmware reporting version `0x00`: a read gave a value not 0, and a write of 6 switched the PicoCalc off a few seconds later (not timed). The processor cannot tell whether it is on battery or USB, and it made no difference |
 
 Registers `0x02` (`CFG`), `0x03` (`INT`), `0x06` (`DEB`) and `0x07` (`FRQ`) are
 **not in the firmware's dispatch** and reply `[0,0]`. That matters: `CFG` is

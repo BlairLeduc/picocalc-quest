@@ -6,6 +6,7 @@
 #ifndef PICOCALC_QUEST_HOST
 #include "pico/time.h"
 
+#include "ff.h"
 #include "picocalc_shell.h"
 #endif
 
@@ -48,6 +49,15 @@ void clock_fallback(uint64_t uptime_ms, clock_tm_t *t) {
     clock_civil(CLOCK_FALLBACK_EPOCH + (int64_t)(uptime_ms / 1000u), t);
 }
 
+uint32_t clock_fattime(const clock_tm_t *t) {
+    int year = t->tm_year + 1900;
+    if (year < 1980) return (uint32_t)(1u << 21 | 1u << 16);
+    if (year > 2107) return (uint32_t)(127u << 25 | 12u << 21 | 31u << 16 | 23u << 11 | 59u << 5 | 29u);
+    return (uint32_t)(year - 1980) << 25 | (uint32_t)(t->tm_mon + 1) << 21 |
+           (uint32_t)t->tm_mday << 16 | (uint32_t)t->tm_hour << 11 |
+           (uint32_t)t->tm_min << 5 | (uint32_t)(t->tm_sec / 2);
+}
+
 #ifndef PICOCALC_QUEST_HOST
 bool picocalc_clock_now(clock_tm_t *t) {
     int64_t utc_ms;
@@ -58,5 +68,17 @@ bool picocalc_clock_now(clock_tm_t *t) {
     }
     clock_fallback(to_ms_since_boot(get_absolute_time()), t);
     return false;
+}
+
+/* FatFs's clock, in place of the SD driver's, which gave 0, an invalid
+ * date (SDCARD_EXTERNAL_FATTIME). With no clock set, FatFs's own fixed
+ * date, as with FF_FS_NORTC. */
+DWORD get_fattime(void) {
+    clock_tm_t t;
+    if (!picocalc_clock_now(&t)) {
+        t = (clock_tm_t){ .tm_year = FF_NORTC_YEAR - 1900, .tm_mon = FF_NORTC_MON - 1,
+                          .tm_mday = FF_NORTC_MDAY };
+    }
+    return (DWORD)clock_fattime(&t);
 }
 #endif

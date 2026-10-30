@@ -47,6 +47,8 @@ volatile uint32_t g_core0_delay_us;
 volatile uint32_t g_core0_update_us, g_core0_updates;
 
 static volatile bool s_park, s_parked;
+static volatile uint8_t s_power_off;     /* seconds asked for; 0 none   */
+static volatile int s_power_off_result;  /* 1 taken, -1 not, 0 pending */
 
 void core1_park(void) {
     s_park = true;
@@ -92,6 +94,15 @@ static void test_pattern(void) {
     lcd_fill(w - sq, h - sq, sq, sq, white);
 }
 #endif
+
+bool core1_power_off(uint8_t seconds) {
+    s_power_off_result = 0;
+    __dmb();
+    s_power_off = seconds;
+    uint32_t t0 = time_us_32();
+    while (s_power_off_result == 0 && time_us_32() - t0 < 200000u) tight_loop_contents();
+    return s_power_off_result > 0;
+}
 
 /* ---- the presenter (§7.3) ----------------------------------------- */
 
@@ -171,6 +182,9 @@ void core1_main(void) {
     uint32_t t0 = time_us_32();
     if (sb_read(SB_REG_VER, r) == SB_OK) g_core1.sb_version = r[1];
     g_core1.i2c_us = time_us_32() - t0;
+    /* As picocalc-rogue asks: firmware that can power off replies to a
+     * read of OFF with something other than 0. */
+    g_core1.sb_power_off = sb_read(SB_REG_OFF, r) == SB_OK && r[1] != 0;
 
     /* 2. The LCD, cleared before DISPON, then the pattern if asked for. */
     t0 = time_us_32();
@@ -208,6 +222,13 @@ void core1_main(void) {
              * flight here. */
             s_parked = true;
             for (;;) tight_loop_contents();
+        }
+
+        /* The power off asked for by core 0's exit (§13.3), between two
+         * of the keyboard's transactions. */
+        if (s_power_off != 0) {
+            s_power_off_result = sb_write(SB_REG_OFF, s_power_off, NULL) == SB_OK ? 1 : -1;
+            s_power_off = 0;
         }
 
         /* A page in place of the selector (§13.1) covers the panel and
