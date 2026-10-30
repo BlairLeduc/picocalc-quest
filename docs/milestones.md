@@ -74,6 +74,9 @@ close, so the engine's time as well as the card's:
 | Kyrandia | `quest-kyr1.000`, `.001` | 51,489 B, 51,502 B | 221, 184 ms |
 | Gobliins 2 | `quest-gob2.s00` | 19,285 B | 49 ms |
 
+Day of the Tentacle's save, by the owner's watch: under a second (no
+capture was running, so no size or exact time).
+
 From Esc to the shell's first screen, release build on the Plus 2, by the
 owner's watch: **just over 2 s**, of which 2 s is the exit page.
 
@@ -98,8 +101,7 @@ owner's watch: **just over 2 s**, of which 2 s is the exit page.
 
 **Not checked:** the banner's time against the shell's on a launch from
 the shell (no UART on the Plus 2); the fallback date in a game's save
-list; Day of the Tentacle's save time (made before a capture was running);
-Esc with neither way out; a card taken out during a game, since the fix;
+list; Day of the Tentacle's exact save time and size; Esc with neither way out; a card taken out during a game, since the fix;
 the button, mode and volume settings by the owner; the release build on
 the Plus 2 W.
 
