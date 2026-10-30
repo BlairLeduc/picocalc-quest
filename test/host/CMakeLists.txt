@@ -30,3 +30,11 @@ target_include_directories(test_keymap PRIVATE ${PROJECT_SOURCE_DIR}/picocalc)
 target_compile_definitions(test_keymap PRIVATE PICOCALC_QUEST_HOST=1)
 target_compile_options(test_keymap PRIVATE ${PICOCALC_QUEST_WARNINGS})
 add_test(NAME test_keymap COMMAND test_keymap)
+
+# The mixer's samples to PWM compare words (§8.2).
+add_executable(test_sound test_sound.c)
+target_include_directories(test_sound PRIVATE ${PROJECT_SOURCE_DIR}/picocalc)
+target_compile_definitions(test_sound PRIVATE PICOCALC_QUEST_HOST=1)
+target_compile_options(test_sound PRIVATE ${PICOCALC_QUEST_WARNINGS})
+target_link_libraries(test_sound PRIVATE m)
+add_test(NAME test_sound COMMAND test_sound)

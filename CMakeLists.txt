@@ -82,6 +82,13 @@ else()
     # ON draws M1's corner-coded test pattern at boot, for bring-up
     # (picocalc/core1.c); OFF, the panel stays black until the first frame.
     option(PICOCALC_QUEST_TEST_PATTERN "draw the test pattern at boot" OFF)
+    # Non-zero is the scratch build that forces the audio's late path
+    # (picocalc/audio_shim.c, §16 M5): core 0's interrupts masked for this
+    # many milliseconds every five seconds.
+    set(PICOCALC_QUEST_AUDIO_STALL 0 CACHE STRING "ms to mask core 0's interrupts every 5 s (scratch)")
+    # ScummVM's OPL (AdLib) emulator for every engine: "db" (DOSBox) or
+    # "mame" (§8.3, M5).
+    set(PICOCALC_QUEST_OPL db CACHE STRING "OPL emulator: db or mame")
     if (PICOCALC_QUEST_SCREEN_CHECK)
         set(PICOCALC_QUEST_SCREEN_CHECK_ON 1)
     else()
@@ -207,6 +214,8 @@ else()
         PICOCALC_QUEST_FB_READ=${PICOCALC_QUEST_FB_READ}
         PICOCALC_QUEST_SCREEN_CHECK=${PICOCALC_QUEST_SCREEN_CHECK_ON}
         PICOCALC_QUEST_TEST_PATTERN=$<BOOL:${PICOCALC_QUEST_TEST_PATTERN}>
+        PICOCALC_QUEST_AUDIO_STALL=${PICOCALC_QUEST_AUDIO_STALL}
+        PICOCALC_QUEST_OPL="${PICOCALC_QUEST_OPL}"
     )
 
     # As upstream: dlmalloc in mspace-only mode over PSRAM, with footers

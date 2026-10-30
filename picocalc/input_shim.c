@@ -81,6 +81,11 @@ int picocalc_input_key(int *pressed, int *keycode, int *ascii, int *flags) {
         if (r == KM_UNKNOWN) g_input_unknown++;
         if (r == KM_STRAY) g_input_stray++;
         if (r != KM_EVENT) continue;
+        /* Upstream's event manager makes its own repeats of a held key,
+         * as ScummVM does everywhere; the MCU's, passed on as more
+         * presses, doubled them and restarted its timer, and SCI0 takes
+         * a second press of an arrow as stop (§9.1, M5). */
+        if (e.repeat) continue;
 
         *pressed = e.down;
         *keycode = e.keycode;
