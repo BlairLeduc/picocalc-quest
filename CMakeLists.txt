@@ -92,6 +92,11 @@ else()
     set(PICOCALC_QUEST_FLASH_DIV 4 CACHE STRING "flash QMI divider at 300 MHz, 0 the bootrom's doubled")
     set(PICOCALC_QUEST_FLASH_RXDELAY 4 CACHE STRING "flash QMI RX delay with FLASH_DIV")
     option(PICOCALC_QUEST_FLASH_SWEEP "qualify flash timings at boot (diagnostic)" OFF)
+    # SCI's AdLib music on one OPL2, mono, in place of two (M8; the
+    # patched sci/sound/drivers/adlib.cpp). It halves the music's cost
+    # but loses the panning, so it stays off: the owner listens through
+    # the headphone jack.
+    option(PICOCALC_QUEST_SCI_OPL_MONO "SCI's AdLib on one OPL2, mono" OFF)
     # ON draws M1's corner-coded test pattern at boot, for bring-up
     # (picocalc/core1.c); OFF, the panel stays black until the first frame.
     option(PICOCALC_QUEST_TEST_PATTERN "draw the test pattern at boot" OFF)
@@ -237,6 +242,7 @@ else()
         PICOCALC_QUEST_FLASH_DIV=${PICOCALC_QUEST_FLASH_DIV}
         PICOCALC_QUEST_FLASH_RXDELAY=${PICOCALC_QUEST_FLASH_RXDELAY}
         PICOCALC_QUEST_FLASH_SWEEP=$<BOOL:${PICOCALC_QUEST_FLASH_SWEEP}>
+        PICOCALC_QUEST_SCI_OPL_MONO=$<BOOL:${PICOCALC_QUEST_SCI_OPL_MONO}>
         PICOCALC_QUEST_TEST_PATTERN=$<BOOL:${PICOCALC_QUEST_TEST_PATTERN}>
         PICOCALC_QUEST_AUDIO_STALL=${PICOCALC_QUEST_AUDIO_STALL}
         PICOCALC_QUEST_OPL="${PICOCALC_QUEST_OPL}"

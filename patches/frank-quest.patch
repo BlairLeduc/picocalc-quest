@@ -854,6 +854,20 @@
 +const ADGameDescription *frank_quest_sci_descriptions() {
 +	return Sci::Sci::SciGameDescriptions;  // the tables open Sci inside Sci
 +}
+--- a/src/engines/sci/sound/drivers/adlib.cpp
++++ b/src/engines/sci/sound/drivers/adlib.cpp
+@@ -36,7 +36,10 @@
+ 
+ namespace Sci {
+ 
+-#ifdef __DC__
++// PicoCalc: mono, one OPL2, as on the Dreamcast, in a build that asks for
++// it; stereo is two OPL2s, which DOSBox's emulator runs as an OPL3, about
++// twice the synthesis (picocalc-quest design.md §8.3, M8).
++#if defined(__DC__) || PICOCALC_QUEST_SCI_OPL_MONO
+ #define STEREO false
+ #else
+ #define STEREO true
 --- a/src/frank_quest_main.cpp
 +++ b/src/frank_quest_main.cpp
 @@ -15,6 +15,7 @@
