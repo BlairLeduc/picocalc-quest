@@ -274,8 +274,40 @@ else()
         -Wl,--wrap=cabal_file_close)
 
     # Upstream's linker script: the 64 KB main stack the GOB engine needs
-    # (§5.4, §12.1).
-    pico_set_linker_script(picocalc-quest ${PICOCALC_QUEST_UPSTREAM}/linker/memmap_frank_quest.ld)
+    # (§5.4, §12.1). M8's SRAM tiers (§16): the code of each tier's object
+    # files runs from SRAM, the way the SDK's script already keeps
+    # libgcc's out of flash: .text excludes them, so .data takes them.
+    # Each tier includes the ones before it; 0 is the control build. M8
+    # measured all four and kept them (milestones.md).
+    set(PICOCALC_QUEST_SRAM_TIER 4 CACHE STRING "SRAM placement tier, 0 none (M8)")
+    set(PICOCALC_QUEST_SRAM_TIERS
+        # 1: the mixer, the rate converter and DOSBox's OPL.
+        "*audio/mixer.cpp.o *audio/rate.cpp.o *opl/dosbox.cpp.o *opl/dbopl.cpp.o"
+        # 2: SCI's AdLib driver and its music.
+        "*sci/sound/drivers/adlib.cpp.o *sci/sound/music.cpp.o"
+        # 3: SCI's interpreter: the VM, the kernel's dispatch, objects and
+        #    scripts.
+        "*sci/engine/vm.cpp.o *sci/engine/vm_types.cpp.o *sci/engine/selector.cpp.o *sci/engine/object.cpp.o *sci/engine/script.cpp.o *sci/engine/seg_manager.cpp.o *sci/engine/kernel.cpp.o"
+        # 4: the PSRAM heap.
+        "*drivers/psram_allocator.c.o *drivers/dlmalloc.c.o")
+    set(PICOCALC_QUEST_SRAM_FILES "")
+    foreach(tier RANGE 1 4)
+        if (tier LESS_EQUAL PICOCALC_QUEST_SRAM_TIER)
+            math(EXPR i "${tier} - 1")
+            list(GET PICOCALC_QUEST_SRAM_TIERS ${i} files)
+            string(APPEND PICOCALC_QUEST_SRAM_FILES " ${files}")
+        endif()
+    endforeach()
+    file(READ ${PICOCALC_QUEST_UPSTREAM}/linker/memmap_frank_quest.ld PICOCALC_QUEST_LD)
+    set(PICOCALC_QUEST_LD_EXCLUDE "EXCLUDE_FILE(*libgcc.a: *libc.a:*lib_a-mem*.o *libm.a:")
+    string(FIND "${PICOCALC_QUEST_LD}" "${PICOCALC_QUEST_LD_EXCLUDE}" at)
+    if (at LESS 0)
+        message(FATAL_ERROR "upstream's linker script has no ${PICOCALC_QUEST_LD_EXCLUDE}")
+    endif()
+    string(REPLACE "${PICOCALC_QUEST_LD_EXCLUDE}" "${PICOCALC_QUEST_LD_EXCLUDE}${PICOCALC_QUEST_SRAM_FILES}"
+        PICOCALC_QUEST_LD "${PICOCALC_QUEST_LD}")
+    file(GENERATE OUTPUT ${CMAKE_BINARY_DIR}/memmap_picocalc_quest.ld CONTENT "${PICOCALC_QUEST_LD}")
+    pico_set_linker_script(picocalc-quest ${CMAKE_BINARY_DIR}/memmap_picocalc_quest.ld)
 
     pico_add_extra_outputs(picocalc-quest)
 

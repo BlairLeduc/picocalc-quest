@@ -58,11 +58,21 @@ fi
 # bootrom, where it waits for a launch that has already happened. The
 # symptom is a firmware whose core 1 prints its first line and goes silent.
 # A power-on reset does not do this; only the debugger's does.
+#
+# For the same reason the DMA and the PWM run on while the cores are
+# halted, and the audio's DMA goes on playing its ring from SRAM. Where
+# the ring falls in OpenOCD's work area (0x20010000-0x2001ffff), the
+# speaker plays the flash buffers, loud (found in M8). So both are held
+# in reset first, through RESETS' atomic set alias (0x40020000 + 0x2000):
+# DMA bit 2, PWM bit 16. The image's start-up takes them out again.
 echo "flash.sh: $(basename "$image") -> $target via $openocd"
 exec "$openocd" ${scripts[@]+"${scripts[@]}"} \
     -f interface/cmsis-dap.cfg \
     -f "target/$target.cfg" \
     -c "adapter speed ${SWD_KHZ:-5000}" \
+    -c "init" \
+    -c "halt" \
+    -c "mww 0x40022000 0x00010004" \
     -c "program \"$image\" verify" \
     -c "reset halt" \
     -c "resume" \

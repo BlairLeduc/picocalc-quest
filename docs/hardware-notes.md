@@ -396,6 +396,26 @@ OpenOCD session and keep it only when both reads agree, retrying a few
 times; or have the writer bump a sequence word before and after the update
 and discard a read whose two sequence words differ.
 
+**Flashing over SWD does not stop the audio's DMA, and OpenOCD's buffers
+can end up on the speaker.** OpenOCD's reset on the RP2350 resets only
+the cores (`SYSRESETREQ` per core), so the DMA and PWM blocks run on
+through `program`. A PWM audio output fed by DMA from a ring in SRAM keeps
+playing that ring while the cores are halted. The Raspberry Pi fork's
+`target/rp2350.cfg` puts the flash work area at `0x20010000`, 64 KB, and
+`program` writes its algorithm and data buffers there. **Seen** on a
+Plus 2 W in a PicoCalc, 2026-10-30, OpenOCD 0.12.0+dev: an image whose
+8 KB audio ring sat at `0x20014000` played loud, garbled sound through the
+speaker for the length of the next flashing. Images with the ring at
+`0x20008000` and `0x20024000` were flashed silently the same day. A
+linker change that moves `.bss` can move the ring into the work area
+without warning. Before `program`, halt and hold DMA and PWM in reset
+through RESETS' atomic set alias: `mww 0x40022000 0x00010004` (DMA bit 2,
+PWM bit 16, RP2350). The SDK's start-up takes every block out of reset
+again. **Checked by ear** the same day, the same image flashed over
+itself from the same idle screen: the old sequence (`program`, then
+`reset halt`, `resume`) was loud again; with `init`, `halt` and the
+`mww` first, it was silent.
+
 ---
 
 ## 3. Clocks, voltage and overclocking

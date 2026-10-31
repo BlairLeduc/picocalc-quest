@@ -1333,6 +1333,12 @@ In measured steps, each against a control build in the same sitting
    audio IRQ, across card reads (163 ms); a SMUSH frame drawn sheared at a
    scene change.
 
+**The gate in play** (the owner, 2026-10-30): a title is judged on its
+play, not on a scene that runs unthrottled. Space Quest IV's intro animates
+as fast as core 0 allows and holds it at 100 % however fast the port gets
+(found in M8: 21 frames a second at 100 % before the row levers, 45 after);
+in play it is measured like the rest.
+
 Then a **30-minute soak** on battery, one title playing, keys typed over
 the UART for the whole run, with a script checking the log: one boot,
 heartbeats throughout, late refills, I²C errors and dropped log lines zero,
