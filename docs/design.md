@@ -1452,8 +1452,16 @@ Every value the port depends on that has not been checked on this hardware
   their music as CD tracks; upstream's CD manager is an empty stub and
   builds no compressed-audio decoder, so they play effects and no music.
   The owner deferred it; it would take a track-file player and a decoder.
-- **Full Throttle's iMUSE mutex across card reads** and **a SMUSH picture
-  fault** at a scene change (both found in M5). M8, by the owner's choice.
+- **Two Full Throttle picture faults** (found in M5 and M8); the iMUSE
+  hold-off found with them is fixed (§8.2). In the porch scene with
+  Ripburger the backdrop is sheared and the walkers leave trails: SMUSH
+  sets the screen's pitch to its width for a movie and back at the end,
+  leaving the last frame at the movie's pitch, and the room is not
+  redrawn over it. Re-laying that frame at the screen's pitch cured the
+  shear but not the trails, and was taken out. Some movies also show
+  patches of white in their backgrounds, in the frames as decoded (every
+  row filled and sent). Both play correctly on the iPad's ScummVM. The
+  owner stopped the chase there (2026-10-31): the game plays through.
 - **A save and load menu for SCUMM.** Its menu is ScummVM's GUI, which
   the build leaves out; Alt+1…9 and Ctrl+1…9 save and load, with no list
   and no names. If quick saves prove too little.
