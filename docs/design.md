@@ -272,6 +272,7 @@ The expected patch, to be confirmed at M0:
 | `src/frank_quest_selector.cpp` | More AGI games by folder name (§10.2; M4). Esc leaves, and the legend names where to (§13.3; M7). To come: text that names PS/2, mouse clicks or HDMI, with `src/frank_quest_welcome.cpp`. |
 | `src/engines/gob/detection/detection.cpp`, `src/engines/sci/detection.cpp`, `src/engines/kyra/detection.cpp` | A function returning the engine's ScummVM table, which is `static` (M4). |
 | `src/backends/timer/default/default-timer.h`, `src/engines/scumm/imuse_digi/dimuse.h` | The timer manager's and digital iMUSE's locks left out, so they do not mask the audio IRQ across card reads (§8.2; M8). |
+| `src/engines/kyra/resource.cpp` | No heap walk before each archive: some 35 lines an archive overran the UART, dropping log lines at every Kyrandia launch (792 in one), and the walk masks the audio IRQ (§14.2; M8). |
 | `src/audio/audiodev/opl.cpp` | A chosen OPL emulator that cannot play the chip a game asks for gives way to the first that can, as `auto` does, where upstream gives none: MAME's chosen, SCI's two OPL2s get DOSBox's in stereo (§8.3; M8). |
 | `src/engines/sci/sound/drivers/adlib.cpp` | SCI's AdLib on one OPL2 in mono, in a build that asks for it (`PICOCALC_QUEST_SCI_OPL_MONO`, off: §8.3; M8). |
 

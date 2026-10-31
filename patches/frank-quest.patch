@@ -878,6 +878,22 @@
 +const KYRAGameDescription *frank_quest_kyra_descriptions() {
 +	return adGameDescs;
 +}
+--- a/src/engines/kyra/resource.cpp
++++ b/src/engines/kyra/resource.cpp
+@@ -341,7 +341,13 @@
+ 				/* Snapshot heap state before the PAK parse so a corruption
+ 				 * triggered during load can be matched against the
+ 				 * pre-load chunk list. */
++				// PicoCalc: not taken. It prints some 35 lines an archive,
++				// more than the UART drains, so the log drops lines at every
++				// launch, and walks the heap under its lock, which masks the
++				// audio IRQ (picocalc-quest design.md §14.2, M8).
++#if 0
+ 				frank_quest_heap_walk();
++#endif
+ 				archive = (*i)->load(member, *stream);
+ 				break;
+ 			} else {
 --- a/src/engines/sci/detection.cpp
 +++ b/src/engines/sci/detection.cpp
 @@ -843,3 +843,9 @@
