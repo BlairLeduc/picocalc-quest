@@ -267,10 +267,12 @@ The expected patch, to be confirmed at M0:
 | `src/board_config.h` | M1/M2 layouts replaced by one PicoCalc block. |
 | `drivers/sdcard/sdcard.c` | `CLK_FAST` made overridable, set to 25 MHz (§10). Its `get_fattime()` (always 0) compiled out in favour of the PicoCalc one (§13.2). |
 | `src/backends/platform/rp2350/rp2350-system.cpp` | `updateScreen()` copies and publishes a frame only when something shown has changed, and hands its own surface to `cabal_update_screen()` in place of a second copy (§7.2; M4). `logMessage()` passes an error's message to the error page (§13.1; M4). `initBackend()` creates the mixer at the audio shim's rate, not a literal 44,100 Hz (§8.2; M5, found in M0); `lockMutex()` masks the audio IRQ by one depth count, with barriers, and does nothing inside the IRQ (§8.2; found in M5). `getTimeAndDate()` asks the PicoCalc clock, keeping upstream's made-up date as the fallback (§13.2; M7). `warpMouse()` moves the poll's place as well as the cursor (§9.3; found in M7). |
-| `src/frank_quest_main.cpp` | The Gob, SCI and Kyra launchers look the folder's game up in the engine's own ScummVM table, by its files' MD5s and sizes, and launch with that entry; upstream fixes one version per game, whatever the files (§10.2; M4). Every game gets its own config domain, `quest-<folder>`, so its own saves (AGI in M4, the rest in M7), and SCI and AGI use the games' own save screens (§10.2; M7). The OPL emulator is the build's, as upstream's `opl_driver` default (§8.3; M5). |
+| `src/frank_quest_main.cpp` | The Gob, SCI and Kyra launchers look the folder's game up in the engine's own ScummVM table, by its files' MD5s and sizes, and launch with that entry; upstream fixes one version per game, whatever the files (§10.2; M4). Every game gets its own config domain, `quest-<folder>`, so its own saves (AGI in M4, the rest in M7), and SCI and AGI use the games' own save screens (§10.2; M7). The OPL emulator is `picocalc.ini`'s, as upstream's `opl_driver` default (§8.3, §10.3; M8). |
 | `src/backends/events/default/default-events.cpp` | No key repeats of the arrows and diagonals (§9.1; found in M5). |
 | `src/frank_quest_selector.cpp` | More AGI games by folder name (§10.2; M4). Esc leaves, and the legend names where to (§13.3; M7). To come: text that names PS/2, mouse clicks or HDMI, with `src/frank_quest_welcome.cpp`. |
 | `src/engines/gob/detection/detection.cpp`, `src/engines/sci/detection.cpp`, `src/engines/kyra/detection.cpp` | A function returning the engine's ScummVM table, which is `static` (M4). |
+| `src/audio/audiodev/opl.cpp` | A chosen OPL emulator that cannot play the chip a game asks for gives way to the first that can, as `auto` does, where upstream gives none: MAME's chosen, SCI's two OPL2s get DOSBox's in stereo (§8.3; M8). |
+| `src/engines/sci/sound/drivers/adlib.cpp` | SCI's AdLib on one OPL2 in mono, in a build that asks for it (`PICOCALC_QUEST_SCI_OPL_MONO`, off: §8.3; M8). |
 
 Each patched hunk carries a comment citing the section of this document
 that requires it (EL §14.1).
@@ -541,15 +543,24 @@ playing, and resizes. Counters (HW §5.8, EL §6.2): late refills (channel
 already running on entry), the mixer's longest run, and its share of
 core 0.
 
-**The OPL emulator** is the build's choice, `PICOCALC_QUEST_OPL`, set as
-upstream's `opl_driver` default for every engine (the Gob launcher's own
-`auto` removed). In Fate of Atlantis's intro (M5, 36,621 Hz): MAME's,
-which `auto` picks for OPL2, took **45–55 %** of core 0 with a longest half
-of 10.8 ms; DOSBox's took **13–18 %** and 4.4 ms. The owner heard MAME's
-as a little softer and better, DOSBox's as not bad, and chose by CPU:
-**DOSBox is the default**, MAME's a build option, to come back if M8's SRAM
-placement brings its cost down. SCI asks for a dual OPL2 in stereo, which
-only DOSBox's emulates anyway.
+**The OPL emulator** is `picocalc.ini`'s `opl` (§10.3), set as upstream's
+`opl_driver` default for every engine (the Gob launcher's own `auto`
+removed). In Fate of Atlantis's intro (M5, 36,621 Hz): MAME's, which
+`auto` picks for OPL2, took **45–55 %** of core 0 with a longest half of
+10.8 ms; DOSBox's took **13–18 %** and 4.4 ms. The owner heard MAME's as a
+little softer and better and chose DOSBox's by CPU in M5. M8 put both in
+SRAM (MAME's tables, about 136 KB, stay in the PSRAM heap) and measured
+again in the same sitting: in Fate of Atlantis MAME's audio share was
+42 % against DOSBox's 12 %, its longest half 11.4 ms of 14.0; in
+Kyrandia 29 % against 8 %. Most games have the room, so **MAME's is the
+default** (the owner, 2026-10-31) and `opl = dosbox` is there for a game
+that does not. MAME's emulates one OPL2 only; SCI asks for two in stereo,
+and upstream then gives no emulator and SCI falls back to one in mono. The
+patched `opl.cpp` gives the first emulator that can instead, so SCI plays
+DOSBox's in stereo whichever is chosen (Space Quest III, audio 23 % either
+way). One OPL2 in mono for SCI halves its music's cost (Space Quest IV in
+play, busiest 5 s 53.8 → 39.5 %), but the owner listens on headphones and
+keeps the stereo: `PICOCALC_QUEST_SCI_OPL_MONO`, off.
 
 If the mixer costs too much, the levers in order: put the mixer, the rate
 converter and the OPL emulator in SRAM (§16, M8); a lower mixer rate (TOP
@@ -776,6 +787,7 @@ sci_mode      = pointer
 scumm_mode    = pointer
 kyra_mode     = pointer
 gob_mode      = pointer
+opl           = mame     the OPL (AdLib) emulator: mame or dosbox (§8.3)
 ```
 
 Keys and words are in any case; blank lines and lines starting `#` or `;`

@@ -4,7 +4,8 @@
  * spacing, CRLF, a BOM and a last line with no end; a bad line named with
  * its number and text and the rest of the file applied; a bad value
  * leaving the setting as it was; the two buttons on one key; more bad
- * lines than there is room to describe; and the volume's gain.
+ * lines than there is room to describe; the volume's gain; and the OPL
+ * emulator.
  */
 
 #include <stdio.h>
@@ -149,6 +150,25 @@ int main(void) {
         CHECK(errs[3].line == 4, "the fourth error on line 4, got %u", errs[3].line);
         CHECK(s.volume == 1, "the good line after them applied, volume %u", s.volume);
     }
+
+    /* The OPL emulator: MAME's by default, either by name in any case,
+     * a bad name leaving it as it was. */
+    {
+        settings_t s;
+        CHECK(parse(&s, "") == 0 && s.opl == SETTINGS_OPL_MAME, "opl default %u", s.opl);
+        CHECK(parse(&s, "opl = dosbox\n") == 0 && s.opl == SETTINGS_OPL_DOSBOX, "opl dosbox %u",
+              s.opl);
+        CHECK(parse(&s, "OPL = DOSBox # lighter\n") == 0 && s.opl == SETTINGS_OPL_DOSBOX,
+              "opl DOSBox %u", s.opl);
+        CHECK(parse(&s, "opl = dosbox\nopl = mame\n") == 0 && s.opl == SETTINGS_OPL_MAME,
+              "opl twice %u", s.opl);
+        CHECK(parse(&s, "opl = dosbox\nopl = nuked\n") == 1 && s.opl == SETTINGS_OPL_DOSBOX,
+              "opl bad kept %u", s.opl);
+        CHECK(strcmp(settings_opl_driver(SETTINGS_OPL_DOSBOX), "db") == 0, "driver db");
+        CHECK(strcmp(settings_opl_driver(SETTINGS_OPL_MAME), "mame") == 0, "driver mame");
+    }
+    expect("opl = mame\n", 0, DEFAULTS);
+    expect_error("opl = db\n", 0, 1, "dosbox or mame", "opl = db");
 
     /* The volume to upstream's gain, 128 at 100 %. */
     CHECK(settings_gain(0) == 0, "gain(0) = %d", settings_gain(0));

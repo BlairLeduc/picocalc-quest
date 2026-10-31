@@ -25,6 +25,24 @@
  /* get the current time */
  DWORD get_fattime (void)
  {
+--- a/src/audio/audiodev/opl.cpp
++++ b/src/audio/audiodev/opl.cpp
+@@ -123,10 +123,11 @@
+ 		} else if ((flags & driverDesc->flags)) {
+ 			return drv;
+ 		} else {
+-			// Else we will output a warning and just
+-			// return that no valid driver is found.
+-			warning("Your selected OPL driver \"%s\" does not support type %d emulation, which is requested by your game", _drivers[drv].description, type);
+-			return -1;
++			// PicoCalc: the first driver that does, as for "auto", so
++			// SCI's two OPL2s get DOSBox's in stereo when MAME's is chosen,
++			// rather than one OPL2 in mono (picocalc-quest design.md §8.3,
++			// M8). Upstream returns that no valid driver is found.
++			warning("Your selected OPL driver \"%s\" does not support type %d emulation, which is requested by your game; using the first that does", _drivers[drv].description, type);
+ 		}
+ 	}
+ 
 --- a/src/backends/events/default/default-events.cpp
 +++ b/src/backends/events/default/default-events.cpp
 @@ -109,6 +109,25 @@
@@ -870,7 +888,7 @@
  #define STEREO true
 --- a/src/frank_quest_main.cpp
 +++ b/src/frank_quest_main.cpp
-@@ -15,6 +15,7 @@
+@@ -15,9 +15,11 @@
  #include "backends/platform/rp2350/rp2350-minimal.h"
  #include "frank_quest_fs.h"
  #include "frank_quest_selector.h"
@@ -878,7 +896,11 @@
  
  extern "C" {
  #include "psram_allocator.h"
-@@ -29,6 +30,9 @@
++#include "settings.h"
+ }
+ 
+ #include "common/system.h"
+@@ -29,6 +31,9 @@
  #include "engines/advancedDetector.h"
  #include "base/plugins.h"
  #include "common/fs.h"
@@ -888,12 +910,10 @@
  #include "common/archive.h"
  
  // GOB Engine includes
-@@ -233,6 +237,21 @@
- 
-     printf("GOB Detection: No known files found\n");
+@@ -235,6 +240,21 @@
      return 0;  // Unknown
-+}
-+
+ }
+ 
 +// PicoCalc: a config domain per game folder, quest-<folder>. Engines name
 +// their save files after the domain, and upstream's one domain per engine
 +// gave every SCUMM game the same quest-scumm.s01, so one game's save
@@ -907,10 +927,12 @@
 +        if (!Common::isAlnum(domain[i]) && domain[i] != '-' && domain[i] != '_')
 +            domain.setChar('_', i);
 +    ConfMan.setActiveDomain(domain);
- }
- 
++}
++
  // Forward declaration
-@@ -257,12 +276,127 @@
+ static bool launchGOBGameWithVersion(const char *gamePath, int gobVersion);
+ 
+@@ -257,12 +277,127 @@
  
  // GOB (Gobliins) game launcher with explicit version
  // Returns true if a game was found and launched
@@ -1039,7 +1061,7 @@
  
      // Set default audio/config values that Engine::syncSoundSettings() expects
      ConfMan.setInt("music_volume", 192);
-@@ -289,7 +423,8 @@
+@@ -289,7 +424,8 @@
      // GOB-specific settings
      ConfMan.setBool("copy_protection", false);  // Skip copy protection
      ConfMan.set("language", "en");
@@ -1049,7 +1071,7 @@
  
      // Graphics settings
      ConfMan.set("gfx_mode", "normal");
-@@ -326,7 +461,13 @@
+@@ -326,7 +462,13 @@
      memset(&gameDesc, 0, sizeof(gameDesc));
  
      // Set up the ADGameDescription part based on detected version
@@ -1064,7 +1086,7 @@
          gameDesc.desc.gameid = "gob3";
          gameDesc.desc.extra = "VGA";
          gameDesc.gameType = Gob::kGameTypeGob3;
-@@ -346,13 +487,15 @@
+@@ -346,13 +488,15 @@
          printf("GOB: Configuring for Gobliiins 1 (EGA)\n");
      }
  
@@ -1087,7 +1109,7 @@
  
      printf("GOB: Creating engine instance...\n");
  
-@@ -378,10 +521,15 @@
+@@ -378,9 +522,14 @@
  static bool launchAGIGame(const char *gamePath) {
      printf("AGI: Attempting to launch game from %s\n", gamePath);
  
@@ -1097,14 +1119,13 @@
      // Set up the game path in config manager
      ConfMan.set("path", gamePath);
 -    ConfMan.setActiveDomain("quest-agi");
- 
++
 +    // PicoCalc: AGI's own save and restore screens, as SCI's (below).
 +    ConfMan.setBool("originalsaveload", true);
-+
+ 
      // Set default audio/config values that Engine::syncSoundSettings() expects
      ConfMan.setInt("music_volume", 192);
-     ConfMan.setInt("sfx_volume", 192);
-@@ -578,8 +726,9 @@
+@@ -578,8 +727,9 @@
             gameId == 1 ? "Kyrandia 2 (Hand of Fate)" : "Kyrandia 1 (Legend of Kyrandia)",
             gamePath);
  
@@ -1115,7 +1136,7 @@
  
      // Audio/config defaults
      ConfMan.setInt("music_volume", 192);
-@@ -614,20 +763,30 @@
+@@ -614,20 +764,30 @@
      static KYRAGameDescription gameDesc;
      memset(&gameDesc, 0, sizeof(gameDesc));
  
@@ -1159,7 +1180,7 @@
  
      printf("KYRA: Creating engine...\n");
      ::Engine *engine = (gameId == 1)
-@@ -708,8 +867,9 @@
+@@ -708,8 +868,9 @@
      printf("SCI: Launching game from %s (id=%s)\n", gamePath,
             gameIdStr ? gameIdStr : "(auto)");
  
@@ -1170,7 +1191,7 @@
  
      ConfMan.setInt("music_volume", 192);
      ConfMan.setInt("sfx_volume", 192);
-@@ -736,7 +896,11 @@
+@@ -736,7 +897,11 @@
      // SCI-specific prefs
      ConfMan.setBool("copy_protection", false);
      ConfMan.setBool("prefer_digitalsfx", false);
@@ -1183,7 +1204,7 @@
      ConfMan.setBool("enable_black_lined_video", false);
      ConfMan.setBool("windows_cursors", false);
      ConfMan.setBool("silver_cursors", false);
-@@ -763,12 +927,16 @@
+@@ -763,12 +928,16 @@
  
      static ADGameDescription gameDesc;
      memset(&gameDesc, 0, sizeof(gameDesc));
@@ -1206,7 +1227,7 @@
  
      ConfMan.set("gameid", gameDesc.gameid);
  
-@@ -867,8 +1035,9 @@
+@@ -867,8 +1036,9 @@
      printf("SCUMM: Launching %s (v%d, id=%s) from %s\n",
             info->gameid, info->version, info->gameid, gamePath);
  
@@ -1217,17 +1238,18 @@
  
      ConfMan.setInt("music_volume", 192);
      ConfMan.setInt("sfx_volume", 192);
-@@ -1028,6 +1197,9 @@
+@@ -1028,6 +1198,10 @@
      ConfMan.registerDefault("language",                        "en");
      ConfMan.registerDefault("gfx_mode",                        "normal");
      ConfMan.registerDefault("render_mode",                     "");
-+    // PicoCalc: the OPL emulator, "db" (DOSBox) or "mame", from the build
-+    // (picocalc-quest design.md §8.3): it is most of the mixer's cost.
-+    ConfMan.registerDefault("opl_driver",                      PICOCALC_QUEST_OPL);
++    // PicoCalc: the OPL emulator, "db" (DOSBox) or "mame", from
++    // picocalc.ini (picocalc-quest design.md §8.3, §10.3): it is most of
++    // the mixer's cost.
++    ConfMan.registerDefault("opl_driver",                      settings_opl_driver(g_settings.opl));
  }
  
  // Dispatch a QuestGame to the engine launcher it belongs to. Returns
-@@ -1164,11 +1336,16 @@
+@@ -1164,11 +1338,16 @@
          // selector frame and the device looks frozen.
          frank_quest_show_loading(g);
  

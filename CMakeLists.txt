@@ -104,9 +104,6 @@ else()
     # (picocalc/audio_shim.c, §16 M5): core 0's interrupts masked for this
     # many milliseconds every five seconds.
     set(PICOCALC_QUEST_AUDIO_STALL 0 CACHE STRING "ms to mask core 0's interrupts every 5 s (scratch)")
-    # ScummVM's OPL (AdLib) emulator for every engine: "db" (DOSBox) or
-    # "mame" (§8.3, M5).
-    set(PICOCALC_QUEST_OPL db CACHE STRING "OPL emulator: db or mame")
     if (PICOCALC_QUEST_SCREEN_CHECK)
         set(PICOCALC_QUEST_SCREEN_CHECK_ON 1)
     else()
@@ -245,7 +242,6 @@ else()
         PICOCALC_QUEST_SCI_OPL_MONO=$<BOOL:${PICOCALC_QUEST_SCI_OPL_MONO}>
         PICOCALC_QUEST_TEST_PATTERN=$<BOOL:${PICOCALC_QUEST_TEST_PATTERN}>
         PICOCALC_QUEST_AUDIO_STALL=${PICOCALC_QUEST_AUDIO_STALL}
-        PICOCALC_QUEST_OPL="${PICOCALC_QUEST_OPL}"
     )
 
     # As upstream: dlmalloc in mspace-only mode over PSRAM, with footers
@@ -298,8 +294,9 @@ else()
     # measured all four and kept them (milestones.md).
     set(PICOCALC_QUEST_SRAM_TIER 4 CACHE STRING "SRAM placement tier, 0 none (M8)")
     set(PICOCALC_QUEST_SRAM_TIERS
-        # 1: the mixer, the rate converter and DOSBox's OPL.
-        "*audio/mixer.cpp.o *audio/rate.cpp.o *opl/dosbox.cpp.o *opl/dbopl.cpp.o"
+        # 1: the mixer, the rate converter and both OPL emulators, the
+        #    one picocalc.ini names (§10.3).
+        "*audio/mixer.cpp.o *audio/rate.cpp.o *opl/dosbox.cpp.o *opl/dbopl.cpp.o *opl/mame.cpp.o"
         # 2: SCI's AdLib driver and its music.
         "*sci/sound/drivers/adlib.cpp.o *sci/sound/music.cpp.o"
         # 3: SCI's interpreter: the VM, the kernel's dispatch, objects and

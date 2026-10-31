@@ -20,6 +20,7 @@
  *     scumm_mode    = pointer
  *     kyra_mode     = pointer
  *     gob_mode      = pointer
+ *     opl           = mame       the AdLib emulator, mame or dosbox (§8.3)
  *
  * The user writes it; nothing here writes it (a menu that does is
  * deferred, §19).
@@ -40,6 +41,9 @@
 #define SETTINGS_SPEED_MAX  400u
 #define SETTINGS_VOLUME_MAX 200u
 
+/* The OPL (AdLib) emulators, by upstream's opl_driver names. */
+enum { SETTINGS_OPL_DOSBOX, SETTINGS_OPL_MAME };
+
 /* By the engine numbers of picocalc_input.h, NONE (0) unused. */
 #define SETTINGS_ENGINES 6
 
@@ -49,6 +53,7 @@ typedef struct {
     uint16_t pointer_speed;   /* per cent of the curve                 */
     uint16_t volume;          /* per cent of the mixer's level         */
     bool     pointer_mode[SETTINGS_ENGINES];   /* the arrows start as the pointer */
+    uint8_t  opl;             /* SETTINGS_OPL_*                        */
 } settings_t;
 
 /* A line not used: its number from 1, where it is in the text (without
@@ -66,6 +71,9 @@ void settings_defaults(settings_t *s);
  * `errors`. */
 unsigned settings_parse(settings_t *s, const char *text, size_t len,
                         settings_error_t *errors, unsigned max_errors);
+
+/* Upstream's opl_driver for a SETTINGS_OPL_*: "db" or "mame". */
+const char *settings_opl_driver(unsigned opl);
 
 /* The mixer's gain for a volume, upstream's 0-255 with 128 for 100 %. */
 int settings_gain(unsigned volume);
