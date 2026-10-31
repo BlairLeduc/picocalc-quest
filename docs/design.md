@@ -271,6 +271,7 @@ The expected patch, to be confirmed at M0:
 | `src/backends/events/default/default-events.cpp` | No key repeats of the arrows and diagonals (§9.1; found in M5). |
 | `src/frank_quest_selector.cpp` | More AGI games by folder name (§10.2; M4). Esc leaves, and the legend names where to (§13.3; M7). To come: text that names PS/2, mouse clicks or HDMI, with `src/frank_quest_welcome.cpp`. |
 | `src/engines/gob/detection/detection.cpp`, `src/engines/sci/detection.cpp`, `src/engines/kyra/detection.cpp` | A function returning the engine's ScummVM table, which is `static` (M4). |
+| `src/backends/timer/default/default-timer.h`, `src/engines/scumm/imuse_digi/dimuse.h` | The timer manager's and digital iMUSE's locks left out, so they do not mask the audio IRQ across card reads (§8.2; M8). |
 | `src/audio/audiodev/opl.cpp` | A chosen OPL emulator that cannot play the chip a game asks for gives way to the first that can, as `auto` does, where upstream gives none: MAME's chosen, SCI's two OPL2s get DOSBox's in stereo (§8.3; M8). |
 | `src/engines/sci/sound/drivers/adlib.cpp` | SCI's AdLib on one OPL2 in mono, in a build that asks for it (`PICOCALC_QUEST_SCI_OPL_MONO`, off: §8.3; M8). |
 
@@ -521,6 +522,16 @@ core 1 would break that protection, so the port keeps upstream's shape:
   IRQ does nothing, as nothing it guards against can run then; and a mutex
   deleted while locked gives back its share. Nine launches of SQ3, two
   minutes each, after the fix: no stop, 0 late refills.
+- Two locks that only core 0's thread takes no longer lock at all (M8,
+  `PICOCALC_QUEST_THREAD_LOCKS`, on): the timer manager's, which upstream
+  holds across every timer callback, and digital iMUSE's. Every lock masks
+  the audio IRQ, and Full Throttle's iMUSE reads the card from its timer
+  callback under both: 163 ms at a scene change in M5, 3 late refills.
+  Timers are run from the main loop here, never from the IRQ, and iMUSE
+  reaches the mixer only through its streams and the mixer, which lock for
+  themselves, so neither lock guarded anything against the IRQ. After:
+  Full Throttle for 8 min 20 s through that scene, 0 late refills. The
+  sound heard there is the game's (car doors), as on other platforms.
 
 The heartbeat's busy share counts the IRQ's time inside `cabal_delay` as
 work (`main.c`), and reports the audio's share, halves refilled, the

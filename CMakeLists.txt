@@ -97,6 +97,10 @@ else()
     # but loses the panning, so it stays off: the owner listens through
     # the headphone jack.
     option(PICOCALC_QUEST_SCI_OPL_MONO "SCI's AdLib on one OPL2, mono" OFF)
+    # The timer manager's and digital iMUSE's locks, taken on core 0's
+    # thread alone, left out so they do not mask the audio IRQ (M8; the
+    # patched default-timer.h and dimuse.h).
+    option(PICOCALC_QUEST_THREAD_LOCKS "no audio mask for thread-only locks" ON)
     # ON draws M1's corner-coded test pattern at boot, for bring-up
     # (picocalc/core1.c); OFF, the panel stays black until the first frame.
     option(PICOCALC_QUEST_TEST_PATTERN "draw the test pattern at boot" OFF)
@@ -240,6 +244,7 @@ else()
         PICOCALC_QUEST_FLASH_RXDELAY=${PICOCALC_QUEST_FLASH_RXDELAY}
         PICOCALC_QUEST_FLASH_SWEEP=$<BOOL:${PICOCALC_QUEST_FLASH_SWEEP}>
         PICOCALC_QUEST_SCI_OPL_MONO=$<BOOL:${PICOCALC_QUEST_SCI_OPL_MONO}>
+        PICOCALC_QUEST_THREAD_LOCKS=$<BOOL:${PICOCALC_QUEST_THREAD_LOCKS}>
         PICOCALC_QUEST_TEST_PATTERN=$<BOOL:${PICOCALC_QUEST_TEST_PATTERN}>
         PICOCALC_QUEST_AUDIO_STALL=${PICOCALC_QUEST_AUDIO_STALL}
     )

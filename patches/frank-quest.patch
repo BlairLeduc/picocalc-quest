@@ -678,6 +678,24 @@
 +	if (type == LogMessageType::kError)
 +		picocalc_fatal_message(message);
  }
+--- a/src/backends/timer/default/default-timer.h
++++ b/src/backends/timer/default/default-timer.h
+@@ -34,7 +34,15 @@
+ private:
+ 	typedef Common::HashMap<Common::String, TimerProc, Common::IgnoreCase_Hash, Common::IgnoreCase_EqualTo> TimerSlotMap;
+ 
++#if PICOCALC_QUEST_THREAD_LOCKS
++	// PicoCalc: no lock. The timers are installed, removed and run on
++	// core 0's thread alone, and a lock masks the audio IRQ, here for
++	// every timer callback, card reads and all (picocalc-quest design.md
++	// §8.2, M8).
++	Common::MutexRef _mutex = nullptr;
++#else
+ 	Common::Mutex _mutex;
++#endif
+ 	TimerSlot *_head;
+ 	TimerSlotMap _callbacks;
+ 
 --- a/src/board_config.h
 +++ b/src/board_config.h
 @@ -15,39 +15,25 @@
@@ -886,6 +904,25 @@
  #define STEREO false
  #else
  #define STEREO true
+--- a/src/engines/scumm/imuse_digi/dimuse.h
++++ b/src/engines/scumm/imuse_digi/dimuse.h
+@@ -69,7 +69,16 @@
+ 
+ 	Track *_track[MAX_DIGITAL_TRACKS + MAX_DIGITAL_FADETRACKS];
+ 
++#if PICOCALC_QUEST_THREAD_LOCKS
++	// PicoCalc: no lock. iMUSE's state is touched on core 0's thread
++	// alone, its timer run there, and the mixer reaches it only through
++	// the streams and the mixer, which lock for themselves; a lock here
++	// masks the audio IRQ across card reads (picocalc-quest design.md
++	// §8.2, M8).
++	Common::MutexRef _mutex = nullptr;
++#else
+ 	Common::Mutex _mutex;
++#endif
+ 	ScummEngine_v7 *_vm;
+ 	Audio::Mixer *_mixer;
+ 	ImuseDigiSndMgr *_sound;
 --- a/src/frank_quest_main.cpp
 +++ b/src/frank_quest_main.cpp
 @@ -15,9 +15,11 @@
