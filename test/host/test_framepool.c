@@ -3,8 +3,9 @@
  *
  * The transitions one by one, then a long random interleaving of both
  * cores' calls (the state machine has no lock of its own, so they can
- * be interleaved here at will), then the colour conversion and the row
- * expander against independent models.
+ * be interleaved here at will), then the row stamps against a model of
+ * the screen, the buffers and the panel, then the colour conversion and
+ * the row expander against independent models.
  */
 
 #include <stdio.h>
@@ -144,6 +145,134 @@ static void test_interleaving(void) {
            (unsigned)p->dropped);
 }
 
+/* The row stamps (§7.2, M8). A model screen of FRAMEPOOL_ROWS rows, each
+ * a number in the low bits; the cursor's drawing ORed into the high
+ * bits, so drawing it again over itself changes nothing, and a new
+ * drawing over an old one leaves some of the old showing, as a cursor's
+ * transparent pixels do. Core 0 changes rows and marks them, moves the
+ * cursor, and fills only the stale rows of a buffer before drawing the
+ * cursor and publishing; core 1 copies only the rows changed since the
+ * panel's frame. Every buffer published must be the screen as it was,
+ * cursor and all, and the panel must be each frame it presents. */
+#define CURSOR_BITS 0xFF000000u
+
+static uint32_t drawn(uint32_t row, uint32_t tag) {
+    return row | tag;
+}
+
+static void test_rows(void) {
+    framepool_t *p = &g_pool;
+    uint8_t *px[FRAMEPOOL_COUNT] = { g_bufs[0], g_bufs[1], g_bufs[2] };
+    framepool_init(p, px);
+
+    static uint32_t screen[FRAMEPOOL_ROWS], buf[FRAMEPOOL_COUNT][FRAMEPOOL_ROWS];
+    static uint32_t panel[FRAMEPOOL_ROWS], want[FRAMEPOOL_ROWS];
+    /* The buffers start as anything: a row never filled must not pass. */
+    for (unsigned i = 0; i < FRAMEPOOL_COUNT; i++)
+        for (unsigned r = 0; r < FRAMEPOOL_ROWS; r++) buf[i][r] = 0xDEAD0000u + r;
+    for (unsigned r = 0; r < FRAMEPOOL_ROWS; r++) {
+        screen[r] = r;
+        panel[r] = 0xBEEF0000u;
+    }
+
+    int cy = 0, cn = 0;           /* the cursor: rows, and what it draws */
+    uint32_t ctag = 0, shown = 0; /* the panel's frame, 0 none           */
+    uint32_t value = 1000, filled = 0, presented = 0, frames = 0, taken = 0;
+    int filling = framepool_claim(p), rendering = -1;
+    for (unsigned step = 0; step < 100000; step++) {
+        unsigned what = rng() % 8u;
+        if (what <= 1) {
+            /* The engine draws a band of rows, some off either edge. */
+            int y = (int)(rng() % (FRAMEPOOL_ROWS + 40u)) - 20, n = (int)(rng() % 30u);
+            for (int r = y; r < y + n; r++)
+                if (r >= 0 && r < FRAMEPOOL_ROWS) screen[r] = ++value & ~CURSOR_BITS;
+            framepool_mark(p, y, n);
+        } else if (what == 2) {
+            /* The cursor moves, changes shape, hides or stays. */
+            switch (rng() % 4u) {
+            case 0: cy = (int)(rng() % FRAMEPOOL_ROWS) - 8; cn = 16; break;
+            case 1: ctag = (rng() % 255u + 1u) << 24; break;
+            case 2: cn = 0; break;
+            default: break;
+            }
+        } else if (what <= 4) {
+            /* Core 0's frame: the cursor's rows, the stale rows, the
+             * cursor, then publish. */
+            static uint32_t last_tag;
+            int n = ctag ? cn : 0;
+            framepool_cursor(p, cy, n, ctag != last_tag);
+            last_tag = ctag;
+            for (unsigned r = 0; r < FRAMEPOOL_ROWS; r++) {
+                if (framepool_stale(p, filling, r)) {
+                    buf[filling][r] = screen[r];
+                    filled++;
+                }
+                want[r] = screen[r];
+            }
+            for (int r = cy; r < cy + n; r++) {
+                if (r < 0 || r >= FRAMEPOOL_ROWS) continue;
+                buf[filling][r] = drawn(buf[filling][r], ctag);
+                want[r] = drawn(want[r], ctag);
+            }
+            for (unsigned r = 0; r < FRAMEPOOL_ROWS; r++) {
+                if (buf[filling][r] != want[r]) {
+                    CHECK(0, "step %u: frame %u row %u is %08x, want %08x", step,
+                          (unsigned)p->published + 1, r, (unsigned)buf[filling][r],
+                          (unsigned)want[r]);
+                    break;
+                }
+            }
+            framepool_publish(p, filling);
+            frames++;
+            filling = framepool_claim(p);
+        } else if (what == 5 && rendering < 0) {
+            rendering = framepool_take(p);
+            if (rendering < 0) continue;
+            taken++;
+            /* Core 1 reads stamps while core 0 goes on marking. */
+            if (rng() % 2u) framepool_mark(p, (int)(rng() % FRAMEPOOL_ROWS), 3);
+            for (unsigned r = 0; r < FRAMEPOOL_ROWS; r++) {
+                if (framepool_changed(p, r, shown)) {
+                    panel[r] = buf[rendering][r];
+                    presented++;
+                }
+            }
+            for (unsigned r = 0; r < FRAMEPOOL_ROWS; r++) {
+                if (panel[r] != buf[rendering][r]) {
+                    CHECK(0, "step %u: the panel's row %u is not frame %u's", step, r,
+                          (unsigned)p->held[rendering]);
+                    break;
+                }
+            }
+            shown = p->held[rendering];
+        } else if (what == 6 && rendering >= 0) {
+            framepool_release(p, rendering);
+            rendering = -1;
+        } else if (what == 7 && rng() % 16u == 0) {
+            /* A page covers the panel: the next present is whole. */
+            for (unsigned r = 0; r < FRAMEPOOL_ROWS; r++) panel[r] = 0xBA5E0000u;
+            shown = 0;
+        }
+    }
+    CHECK(filled < frames * FRAMEPOOL_ROWS && presented < taken * FRAMEPOOL_ROWS,
+          "the stamps saved nothing: %u of %u rows filled, %u of %u presented",
+          (unsigned)filled, (unsigned)(frames * FRAMEPOOL_ROWS), (unsigned)presented,
+          (unsigned)(taken * FRAMEPOOL_ROWS));
+    printf("rows: %u frames, %u of %u rows filled; %u presented, %u of %u rows sent\n",
+           (unsigned)frames, (unsigned)filled, (unsigned)(frames * FRAMEPOOL_ROWS),
+           (unsigned)taken, (unsigned)presented, (unsigned)(taken * FRAMEPOOL_ROWS));
+
+    /* Marks clip to the frame. */
+    framepool_init(p, px);
+    framepool_mark(p, -5, 10);
+    framepool_mark(p, FRAMEPOOL_ROWS - 2, 10);
+    CHECK(p->row_seq[0] == 1 && p->row_seq[FRAMEPOOL_ROWS - 1] == 1,
+          "a mark off an edge clips");
+    CHECK(framepool_stale(p, 0, 0) && !framepool_stale(p, 0, FRAMEPOOL_ROWS) &&
+              !framepool_changed(p, FRAMEPOOL_ROWS, 0),
+          "a new buffer is stale everywhere; a row past the frame is never");
+}
+
 /* RGB565 by a different route: scale each channel down by division. */
 static uint16_t model_rgb565(unsigned r, unsigned g, unsigned b) {
     return (uint16_t)((r * 32u / 256u) * 2048u + (g * 64u / 256u) * 32u + b * 32u / 256u);
@@ -199,6 +328,7 @@ static void test_expand(void) {
 int main(void) {
     test_transitions();
     test_interleaving();
+    test_rows();
     test_colour();
     test_expand();
     if (failures) {

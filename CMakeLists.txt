@@ -79,6 +79,11 @@ else()
     # changed with nothing marking it. A diagnostic: it costs core 0 a
     # PSRAM read of the screen per skip.
     option(PICOCALC_QUEST_SCREEN_CHECK "log screen writes the update skip missed" OFF)
+    # M8's row levers (picocalc/video.h), each OFF for its control build:
+    # core 0 refills only a frame buffer's stale rows; core 1 sends the
+    # panel only the rows changed since its last frame.
+    option(PICOCALC_QUEST_ROW_COPY "refill only the rows changed since a buffer's frame" ON)
+    option(PICOCALC_QUEST_ROW_PRESENT "present only the rows changed since the panel's frame" ON)
     # ON draws M1's corner-coded test pattern at boot, for bring-up
     # (picocalc/core1.c); OFF, the panel stays black until the first frame.
     option(PICOCALC_QUEST_TEST_PATTERN "draw the test pattern at boot" OFF)
@@ -219,6 +224,8 @@ else()
         # How core 1 reads frames from the PSRAM (video.h, §7.3).
         PICOCALC_QUEST_FB_READ=${PICOCALC_QUEST_FB_READ}
         PICOCALC_QUEST_SCREEN_CHECK=${PICOCALC_QUEST_SCREEN_CHECK_ON}
+        PICOCALC_QUEST_ROW_COPY=$<BOOL:${PICOCALC_QUEST_ROW_COPY}>
+        PICOCALC_QUEST_ROW_PRESENT=$<BOOL:${PICOCALC_QUEST_ROW_PRESENT}>
         PICOCALC_QUEST_TEST_PATTERN=$<BOOL:${PICOCALC_QUEST_TEST_PATTERN}>
         PICOCALC_QUEST_AUDIO_STALL=${PICOCALC_QUEST_AUDIO_STALL}
         PICOCALC_QUEST_OPL="${PICOCALC_QUEST_OPL}"

@@ -4,6 +4,7 @@
 #include "core1.h"
 
 #include <stdio.h>
+#include <string.h>
 
 #include "hardware/dma.h"
 #include "hardware/sync.h"
@@ -108,12 +109,18 @@ bool core1_power_off(uint8_t seconds) {
 
 typedef struct {
     uint32_t presents;
+    uint32_t rows;       /* rows sent, since boot          */
     uint32_t last_us;    /* the last present, wall time   */
     uint32_t max_us;     /* the longest since boot        */
 } present_stats_t;
 
 static present_stats_t s_present;
 static uint16_t s_line[2][FRAME_W];
+
+/* What the panel shows: the frame (0: something else, so every row is
+ * sent next), and the palette it was sent with. */
+static uint32_t s_shown;
+static uint16_t s_shown_pal[256];
 
 #if PICOCALC_QUEST_FB_READ == FB_READ_DMA
 /* Rows of indices, copied out of the PSRAM a row ahead of the one being
@@ -130,23 +137,20 @@ static void row_dma_start(const uint8_t *src, unsigned slot) {
 }
 #endif
 
-/* Every row of the frame, through its palette, into one line buffer while
- * the other is on the wire (hardware-notes.md §4.6). */
-static void present(int i) {
-    const uint8_t *px = video_pixels(i);
-    const uint16_t *pal = video_palette(i);
-    uint32_t t0 = time_us_32();
-
-    lcd_blit_begin(0, FRAME_Y, FRAME_W, FRAME_H);
+/* Rows r0 to r0 + n - 1 of the frame, through its palette, into one line
+ * buffer while the other is on the wire (hardware-notes.md §4.6). */
+static void present_rows(const uint8_t *px, const uint16_t *pal, unsigned r0, unsigned n) {
+    lcd_blit_begin(0, FRAME_Y + r0, FRAME_W, n);
 #if PICOCALC_QUEST_FB_READ == FB_READ_DMA
-    row_dma_start(px, 0);
+    row_dma_start(px + r0 * FRAME_W, 0);
 #endif
-    for (unsigned row = 0; row < FRAME_H; row++) {
-        uint16_t *line = s_line[row & 1u];
+    for (unsigned k = 0; k < n; k++) {
+        unsigned row = r0 + k;
+        uint16_t *line = s_line[k & 1u];
 #if PICOCALC_QUEST_FB_READ == FB_READ_DMA
         dma_channel_wait_for_finish_blocking((unsigned)s_row_dma);
-        if (row + 1u < FRAME_H) row_dma_start(px + (row + 1u) * FRAME_W, (row + 1u) & 1u);
-        frame_expand_row((const uint8_t *)s_idx[row & 1u], pal, line, FRAME_W);
+        if (k + 1u < n) row_dma_start(px + (row + 1u) * FRAME_W, (k + 1u) & 1u);
+        frame_expand_row((const uint8_t *)s_idx[k & 1u], pal, line, FRAME_W);
 #else
         frame_expand_row(px + row * FRAME_W, pal, line, FRAME_W);
 #endif
@@ -154,9 +158,36 @@ static void present(int i) {
         if (row % PUMP_ROWS == PUMP_ROWS - 1u) log_pump();
     }
     lcd_blit_end();
+}
+
+/* The rows changed since the panel's frame, a window per run of them;
+ * every row when the palette changed, or with PICOCALC_QUEST_ROW_PRESENT
+ * off (§16 M8). */
+static void present(int i) {
+    const uint8_t *px = video_pixels(i);
+    const uint16_t *pal = video_palette(i);
+    uint32_t t0 = time_us_32();
+
+    uint32_t since = s_shown;
+    if (!PICOCALC_QUEST_ROW_PRESENT || memcmp(pal, s_shown_pal, sizeof(s_shown_pal)) != 0)
+        since = 0;
+    unsigned sent = 0;
+    for (unsigned r = 0; r < FRAME_H;) {
+        if (!video_row_changed(r, since)) {
+            r++;
+            continue;
+        }
+        unsigned r0 = r;
+        while (r < FRAME_H && video_row_changed(r, since)) r++;
+        present_rows(px, pal, r0, r - r0);
+        sent += r - r0;
+    }
+    s_shown = video_frame(i);
+    memcpy(s_shown_pal, pal, sizeof(s_shown_pal));
 
     uint32_t us = time_us_32() - t0;
     s_present.presents++;
+    s_present.rows += sent;
     s_present.last_us = us;
     if (us > s_present.max_us) s_present.max_us = us;
 }
@@ -212,7 +243,7 @@ void core1_main(void) {
     uint32_t seconds = 0, loops = 0;
     uint32_t last_pub = 0, last_drop = 0, last_presents = 0, last_delay = g_core0_delay_us;
     uint32_t last_update = g_core0_update_us, last_updates = g_core0_updates;
-    uint32_t last_taken = 0, last_wait = 0;
+    uint32_t last_taken = 0, last_wait = 0, last_filled = 0, last_sent = 0;
     uint32_t last_mix = g_sound.mix_us, last_halves = g_sound.halves;
     for (;;) {
         log_pump();
@@ -237,6 +268,7 @@ void core1_main(void) {
         if (wanted != page) {
             page = wanted;
             page_draw(page);
+            s_shown = 0;
         }
 
         int frame = video_take();
@@ -287,6 +319,7 @@ void core1_main(void) {
             uint32_t taken = g_input_taken, wait = g_input_wait_sum_us;
             uint32_t mix = g_sound.mix_us, halves = g_sound.halves;
             uint32_t mix_max = g_sound.mix_max_us;
+            uint32_t filled = g_video_rows_filled, sent = s_present.rows;
             g_sound.mix_max_us = 0;
             video_counts(&pub, &drop);
             /* Core 0's busy share: the second's wall time not in
@@ -299,7 +332,7 @@ void core1_main(void) {
             uint32_t mixed = (mix - last_mix) / (HEARTBEAT_US / 1000u);
             printf("hb %lu: core 0 busy %lu.%lu%%, update %lu.%lu%% in %lu calls, "
                    "audio %lu.%lu%% in %lu halves (max %lu us), late %lu, frames %lu, presented %lu, dropped %lu, "
-                   "present %lu us (max %lu), publish max %lu us, core 1 stack %lu B; "
+                   "rows filled %lu sent %lu, present %lu us (max %lu), publish max %lu us, core 1 stack %lu B; "
                    "keys %lu (wait mean %lu max %lu us), ring full %lu, unknown %lu, "
                    "stray %lu; temp %d C, battery %d%%%s, i2c errors %lu, log dropped %lu, "
                    "core 1 loops %lu\n",
@@ -311,7 +344,8 @@ void core1_main(void) {
                    (unsigned long)g_sound.late,
                    (unsigned long)(pub - last_pub),
                    (unsigned long)(s_present.presents - last_presents),
-                   (unsigned long)(drop - last_drop), (unsigned long)s_present.last_us,
+                   (unsigned long)(drop - last_drop), (unsigned long)(filled - last_filled),
+                   (unsigned long)(sent - last_sent), (unsigned long)s_present.last_us,
                    (unsigned long)s_present.max_us, (unsigned long)g_video_publish_max_us,
                    (unsigned long)stack_used(), (unsigned long)(taken - last_taken),
                    (unsigned long)(taken == last_taken ? 0 : (wait - last_wait) / (taken - last_taken)),
@@ -324,6 +358,8 @@ void core1_main(void) {
             last_pub = pub;
             last_drop = drop;
             last_presents = s_present.presents;
+            last_filled = filled;
+            last_sent = sent;
             last_delay = delay;
             last_update = update;
             last_updates = updates;

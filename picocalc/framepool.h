@@ -16,8 +16,16 @@
  * transition under one SIO spinlock (video_shim.c). Keeping the lock out
  * is what lets the transitions be tested on a host (EL §2.4).
  *
+ * Each row carries a stamp: the number of the first frame to show its
+ * latest change. A buffer remembers the frame it holds, so core 0 fills
+ * only the rows changed since then, and core 1 sends the panel only the
+ * rows changed since the frame it last presented (found in M8: one 64 KB
+ * copy a frame was a quarter of core 0 in Space Quest IV). Stamps only
+ * grow, so a stamp read while core 0 marks a later frame errs towards a
+ * row too many, never one too few.
+ *
  * From pico-oric's snappool (D6), with the pixels in PSRAM by pointer
- * and the palette added.
+ * and the palette and the row stamps added.
  */
 #ifndef PICOCALC_QUEST_FRAMEPOOL_H
 #define PICOCALC_QUEST_FRAMEPOOL_H
@@ -25,6 +33,7 @@
 #include <stdint.h>
 
 #define FRAMEPOOL_COUNT 3
+#define FRAMEPOOL_ROWS  240
 
 typedef enum {
     FRAME_FREE,       /* owned by nobody; core 0 may claim it        */
@@ -39,9 +48,13 @@ typedef struct {
     frame_state_t state[FRAMEPOOL_COUNT];
     uint32_t      published;   /* frames published                   */
     uint32_t      dropped;     /* superseded before core 1 took them */
+    uint32_t      held[FRAMEPOOL_COUNT];          /* frame each holds; 0 none  */
+    uint32_t      row_seq[FRAMEPOOL_ROWS];        /* first frame with the row  */
+    int           cursor_y, cursor_n;             /* rows the cursor was on    */
 } framepool_t;
 
-/* Every buffer free, the counters zero, the palettes black. */
+/* Every buffer free and holding no frame, the counters zero, the
+ * palettes black. */
 void framepool_init(framepool_t *p, uint8_t *const pixels[FRAMEPOOL_COUNT]);
 
 /* Core 0: take a free buffer to fill. Returns its index, or -1 if none
@@ -49,9 +62,10 @@ void framepool_init(framepool_t *p, uint8_t *const pixels[FRAMEPOOL_COUNT]);
  * at most one, so -1 is a bug, not back-pressure. */
 int  framepool_claim(framepool_t *p);
 
-/* Core 0: filling -> ready. Any older ready buffer is superseded and
- * freed on the spot, unpresented, so there is always a free buffer for
- * the next claim and core 0 never waits for core 1. */
+/* Core 0: filling -> ready, and the buffer now holds the next frame.
+ * Any older ready buffer is superseded and freed on the spot,
+ * unpresented, so there is always a free buffer for the next claim and
+ * core 0 never waits for core 1. */
 void framepool_publish(framepool_t *p, int i);
 
 /* Core 1: take the ready buffer, if there is one; ready -> rendering.
@@ -60,6 +74,26 @@ int  framepool_take(framepool_t *p);
 
 /* Core 1: rendering -> free. */
 void framepool_release(framepool_t *p, int i);
+
+/* Core 0: rows y0 to y0 + n - 1 change in the next frame published.
+ * Clipped to the frame. */
+void framepool_mark(framepool_t *p, int y0, int n);
+
+/* Core 0: the rows something is drawn over in the next frame and not in
+ * the screen it is copied from (the cursor), n 0 for none. `moved` says
+ * what is drawn there differs from the last frame's. When it does, or
+ * the rows do, both the old rows and the new are marked, so a buffer
+ * that still has the old drawing is refilled there. Drawing over rows
+ * not refilled is then drawing the same pixels over themselves. */
+void framepool_cursor(framepool_t *p, int y0, int n, int moved);
+
+/* Whether buffer i's row is older than the row's latest change: core 0
+ * refills it before publishing. */
+int  framepool_stale(const framepool_t *p, int i, unsigned row);
+
+/* Whether the row changed after frame `since` (0: before any frame, so
+ * always): core 1 presents it if the panel shows frame `since`. */
+int  framepool_changed(const framepool_t *p, unsigned row, uint32_t since);
 
 /* Upstream's 0xRRGGBB to the panel's RGB565: the top bits of each. */
 uint16_t frame_rgb565(uint32_t rgb888);
