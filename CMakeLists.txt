@@ -84,6 +84,14 @@ else()
     # panel only the rows changed since its last frame.
     option(PICOCALC_QUEST_ROW_COPY "refill only the rows changed since a buffer's frame" ON)
     option(PICOCALC_QUEST_ROW_PRESENT "present only the rows changed since the panel's frame" ON)
+    # M8's flash lever (picocalc/board.c, §11.4): the QMI divider and RX
+    # delay at 300 MHz, 0 for the bootrom's doubled (6 and 4, 50 MHz).
+    # M8 qualified 4 at RX delays 1-7 and kept 4, 4: 75 MHz.
+    # FLASH_SWEEP ON is the diagnostic build that qualifies them: every
+    # divider and RX delay read against the image's checksum at boot.
+    set(PICOCALC_QUEST_FLASH_DIV 4 CACHE STRING "flash QMI divider at 300 MHz, 0 the bootrom's doubled")
+    set(PICOCALC_QUEST_FLASH_RXDELAY 4 CACHE STRING "flash QMI RX delay with FLASH_DIV")
+    option(PICOCALC_QUEST_FLASH_SWEEP "qualify flash timings at boot (diagnostic)" OFF)
     # ON draws M1's corner-coded test pattern at boot, for bring-up
     # (picocalc/core1.c); OFF, the panel stays black until the first frame.
     option(PICOCALC_QUEST_TEST_PATTERN "draw the test pattern at boot" OFF)
@@ -226,6 +234,9 @@ else()
         PICOCALC_QUEST_SCREEN_CHECK=${PICOCALC_QUEST_SCREEN_CHECK_ON}
         PICOCALC_QUEST_ROW_COPY=$<BOOL:${PICOCALC_QUEST_ROW_COPY}>
         PICOCALC_QUEST_ROW_PRESENT=$<BOOL:${PICOCALC_QUEST_ROW_PRESENT}>
+        PICOCALC_QUEST_FLASH_DIV=${PICOCALC_QUEST_FLASH_DIV}
+        PICOCALC_QUEST_FLASH_RXDELAY=${PICOCALC_QUEST_FLASH_RXDELAY}
+        PICOCALC_QUEST_FLASH_SWEEP=$<BOOL:${PICOCALC_QUEST_FLASH_SWEEP}>
         PICOCALC_QUEST_TEST_PATTERN=$<BOOL:${PICOCALC_QUEST_TEST_PATTERN}>
         PICOCALC_QUEST_AUDIO_STALL=${PICOCALC_QUEST_AUDIO_STALL}
         PICOCALC_QUEST_OPL="${PICOCALC_QUEST_OPL}"

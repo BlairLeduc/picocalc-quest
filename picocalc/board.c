@@ -10,6 +10,7 @@
 #include "hardware/flash.h"
 #include "hardware/structs/qmi.h"
 #include "hardware/structs/sysinfo.h"
+#include "hardware/structs/timer.h"
 #include "hardware/sync.h"
 #include "hardware/vreg.h"
 #include "pico/stdlib.h"
@@ -30,6 +31,12 @@ static void __no_inline_not_in_flash_func(flash_timing_scale)(unsigned mul) {
     uint32_t rx = (t & QMI_M0_TIMING_RXDELAY_BITS) >> QMI_M0_TIMING_RXDELAY_LSB;
     div *= mul;
     rx *= mul;
+#if PICOCALC_QUEST_FLASH_DIV
+    /* M8's lever: a faster flash, at a divider and RX delay qualified by
+     * the sweep below (§11.4). */
+    div = PICOCALC_QUEST_FLASH_DIV;
+    rx = PICOCALC_QUEST_FLASH_RXDELAY;
+#endif
     if (div > 255u) div = 255u;
     if (rx > 7u) rx = 7u;
     t &= ~(QMI_M0_TIMING_CLKDIV_BITS | QMI_M0_TIMING_RXDELAY_BITS);
@@ -40,6 +47,55 @@ static void __no_inline_not_in_flash_func(flash_timing_scale)(unsigned mul) {
     __isb();
     restore_interrupts(irq);
 }
+
+#if PICOCALC_QUEST_FLASH_SWEEP
+/* The diagnostic build's qualification of faster flash timings (§11.4,
+ * §16 M8): at 300 MHz, for each divider in SWEEP_DIVS and each RX delay,
+ * the whole image read SWEEP_PASSES times through the uncached,
+ * unallocating XIP window and checksummed against the sum read at the
+ * timing in use. All of it from SRAM with interrupts off and core 1 not
+ * yet started, so nothing else fetches from flash while the timing is
+ * wrong; reads cannot change the flash. The banner prints the table. */
+#define SWEEP_PASSES 2u
+/* Not const: in SRAM, not read from flash at a timing under test. */
+static volatile uint8_t s_sweep_divs[] = { 2, 3, 4, 5, 6 };
+#define SWEEP_DIVS (sizeof s_sweep_divs)
+static uint8_t s_sweep_ok[SWEEP_DIVS][8];
+static uint32_t s_sweep_us[SWEEP_DIVS][8];
+static uint32_t s_sweep_bytes;
+extern char __flash_binary_start, __flash_binary_end;
+
+static uint32_t __no_inline_not_in_flash_func(flash_sum)(const volatile uint32_t *p, uint32_t words) {
+    uint32_t sum = 0;
+    for (uint32_t i = 0; i < words; i++) sum = (sum << 5 | sum >> 27) ^ p[i];
+    return sum;
+}
+
+static void __no_inline_not_in_flash_func(flash_sweep)(void) {
+    uint32_t start = (uint32_t)(uintptr_t)&__flash_binary_start - XIP_BASE;
+    uint32_t words = ((uint32_t)(uintptr_t)&__flash_binary_end - XIP_BASE - start) / 4u;
+    const volatile uint32_t *p = (const volatile uint32_t *)(XIP_NOCACHE_NOALLOC_BASE + start);
+    s_sweep_bytes = words * 4u;
+
+    uint32_t irq = save_and_disable_interrupts();
+    uint32_t safe = qmi_hw->m[0].timing;
+    uint32_t want = flash_sum(p, words);
+    for (unsigned d = 0; d < SWEEP_DIVS; d++) {
+        for (unsigned rx = 0; rx < 8u; rx++) {
+            uint32_t t = safe & ~(QMI_M0_TIMING_CLKDIV_BITS | QMI_M0_TIMING_RXDELAY_BITS);
+            qmi_hw->m[0].timing = t | (uint32_t)s_sweep_divs[d] << QMI_M0_TIMING_CLKDIV_LSB |
+                                  rx << QMI_M0_TIMING_RXDELAY_LSB;
+            __dsb();
+            uint32_t t0 = timer_hw->timerawl;
+            for (unsigned k = 0; k < SWEEP_PASSES; k++) s_sweep_ok[d][rx] += flash_sum(p, words) == want;
+            s_sweep_us[d][rx] = (timer_hw->timerawl - t0) / SWEEP_PASSES;
+            qmi_hw->m[0].timing = safe;
+            __dsb();
+        }
+    }
+    restore_interrupts(irq);
+}
+#endif
 
 /* The flash's size from its JEDEC id (§11.2): the third byte is log2 of
  * the capacity on the parts these boards carry. Read before the clock
@@ -76,6 +132,9 @@ bool board_init_clocks(void) {
             return false;
         }
     }
+#if PICOCALC_QUEST_FLASH_SWEEP
+    flash_sweep();
+#endif
 
     /* set_sys_clock_pll otherwise parks clk_peri on the 48 MHz USB PLL,
      * and clk_peri does not follow clk_sys by default. Every derived
@@ -156,4 +215,16 @@ void board_log_banner(const board_info_t *info) {
     printf("  psram        : QMI clkdiv %u rxdelay %u (%lu kHz)\n", pdiv,
            timing_rx(info->psram_timing),
            (unsigned long)(pdiv ? info->clk_sys_hz / pdiv / 1000u : 0u));
+#if PICOCALC_QUEST_FLASH_SWEEP
+    printf("  flash sweep  : %lu B read %u times a timing; passes, and ms a read:\n",
+           (unsigned long)s_sweep_bytes, SWEEP_PASSES);
+    for (unsigned d = 0; d < SWEEP_DIVS; d++) {
+        printf("    clkdiv %u (%lu kHz):", s_sweep_divs[d],
+               (unsigned long)(info->clk_sys_hz / s_sweep_divs[d] / 1000u));
+        for (unsigned rx = 0; rx < 8u; rx++)
+            printf(" rx%u %u/%u %lu", rx, s_sweep_ok[d][rx], SWEEP_PASSES,
+                   (unsigned long)(s_sweep_us[d][rx] / 1000u));
+        printf("\n");
+    }
+#endif
 }

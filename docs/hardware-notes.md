@@ -416,6 +416,16 @@ itself from the same idle screen: the old sequence (`program`, then
 `reset halt`, `resume`) was loud again; with `init`, `halt` and the
 `mww` first, it was silent.
 
+**Reset the cores before that, do not just halt.** OpenOCD's `halt`
+stops core 0 alone, and the RP2350's timer pauses while either core is
+halted in debug, so core 1 stops where it is: inside a southbridge I²C
+transaction, it holds the bus for the whole flashing. **Seen** on the
+same board, 2026-10-30: with `init`, `halt`, `mww`, `program`, the
+southbridge's MCU did not answer after three flashings of four, until a
+power cycle (the PicoCalc trap of §6.1). With `init`, `reset halt`, `mww`,
+`program`, four flashings in a row, three of them with a game running,
+left it answering every time.
+
 ---
 
 ## 3. Clocks, voltage and overclocking
@@ -540,6 +550,27 @@ PSRAM's chip select (`m[1]`) around these calls, but not the flash's own
 `flash_do_cmd` after the clock went up left the timing at clkdiv 3,
 RX delay 2. Read the flash's ids before raising the clock, or write the
 timing again after every flash command.
+
+**The flash's read window at 300 MHz, measured.** On a Pimoroni Pico
+Plus 2 W (RP2350B rev 2, 16 MB flash) in a PicoCalc, 2026-10-30, core
+rail 1.20 V, room temperature: a 3.76 MB image read twice per setting
+through the uncached, unallocating XIP window (`0x14000000`), from SRAM
+with interrupts off, each read's checksum compared against one taken at
+the bootrom's doubled timing. The RX delays (in half `clk_sys` cycles)
+that read the image intact:
+
+| Divider | Flash clock | RX delays intact | One read of the image |
+|---:|---:|---|---:|
+| 6 | 50 MHz | 0–7 | 170–179 ms |
+| 5 | 60 MHz | 0–7 | 145–157 ms |
+| 4 | 75 MHz | 1–7 (0 failed on one boot of two) | 123–132 ms |
+| 3 | 100 MHz | 2–6 | 97–110 ms |
+| 2 | 150 MHz | 3–5 | 75–85 ms |
+
+The window narrows and moves later as the clock rises, and a setting at
+its edge passes on one boot and fails on the next, so take the middle of
+the window, not an edge that passed once. One board, one temperature:
+qualify again on another board, or hot.
 
 **The core rail survives a reset.** A 150 MHz build flashed over SWD after a
 300 MHz run, or restarted by the watchdog, comes back with the rail still at

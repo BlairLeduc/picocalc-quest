@@ -65,13 +65,17 @@ fi
 # speaker plays the flash buffers, loud (found in M8). So both are held
 # in reset first, through RESETS' atomic set alias (0x40020000 + 0x2000):
 # DMA bit 2, PWM bit 16. The image's start-up takes them out again.
+# After a reset, not a plain halt: a halt stops core 0 alone, the timer
+# pauses with it, and core 1 can stop in the middle of a southbridge
+# transaction for the whole flashing, which leaves the southbridge's MCU
+# dead until a power cycle (found in M8, three times in four).
 echo "flash.sh: $(basename "$image") -> $target via $openocd"
 exec "$openocd" ${scripts[@]+"${scripts[@]}"} \
     -f interface/cmsis-dap.cfg \
     -f "target/$target.cfg" \
     -c "adapter speed ${SWD_KHZ:-5000}" \
     -c "init" \
-    -c "halt" \
+    -c "reset halt" \
     -c "mww 0x40022000 0x00010004" \
     -c "program \"$image\" verify" \
     -c "reset halt" \
