@@ -9,7 +9,7 @@
 # INDEX is the title's place in the selector, from 0 at the top. The log
 # goes to out/soak-<time>.log, or SOAK_LOG. Start it, then switch the
 # PicoCalc on (on battery, for the real soak): it waits up to 60 s for
-# the banner, skips the welcome, launches the title, and for SOAK_MIN
+# the banner (SOAK_WAIT), skips the welcome, launches the title, and for SOAK_MIN
 # minutes holds the arrows in turn and clicks with Enter now and then.
 #
 # The check passes when the log shows one boot; from it, a heartbeat
@@ -74,7 +74,7 @@ wait_for() {   # PATTERN SECONDS
         sleep 0.5
     done
 }
-wait_for '^hb 3:' 60
+wait_for '^hb 3:' "${SOAK_WAIT:-60}"
 for try in 1 2 3 4; do   # the welcome: a key the first moments can lose
     "$keys" space
     wait_for 'Selector: found' 5 2>/dev/null && break

@@ -8,9 +8,11 @@
 #include "hardware/adc.h"
 #include "hardware/clocks.h"
 #include "hardware/flash.h"
+#include "hardware/structs/powman.h"
 #include "hardware/structs/qmi.h"
 #include "hardware/structs/sysinfo.h"
 #include "hardware/structs/timer.h"
+#include "hardware/structs/watchdog.h"
 #include "hardware/sync.h"
 #include "hardware/vreg.h"
 #include "pico/stdlib.h"
@@ -194,6 +196,38 @@ static unsigned timing_div(uint32_t t) {
     return (t & QMI_M0_TIMING_CLKDIV_BITS) >> QMI_M0_TIMING_CLKDIV_LSB;
 }
 
+/* Why the chip last reset, from POWMAN's record of it and the
+ * watchdog's: a restart nobody asked for says what it was (found in M8:
+ * two in a soak, with no line before them). */
+static void log_reset(void) {
+    static const struct {
+        uint32_t    bit;
+        const char *name;
+    } causes[] = {
+        { POWMAN_CHIP_RESET_HAD_POR_BITS, "power-on" },
+        { POWMAN_CHIP_RESET_HAD_BOR_BITS, "brown-out" },
+        { POWMAN_CHIP_RESET_HAD_RUN_LOW_BITS, "RUN pin" },
+        { POWMAN_CHIP_RESET_HAD_DP_RESET_REQ_BITS, "debugger" },
+        { POWMAN_CHIP_RESET_HAD_RESCUE_BITS, "rescue" },
+        { POWMAN_CHIP_RESET_HAD_WATCHDOG_RESET_POWMAN_ASYNC_BITS, "watchdog (powman async)" },
+        { POWMAN_CHIP_RESET_HAD_WATCHDOG_RESET_POWMAN_BITS, "watchdog (powman)" },
+        { POWMAN_CHIP_RESET_HAD_WATCHDOG_RESET_SWCORE_BITS, "watchdog (switched core)" },
+        { POWMAN_CHIP_RESET_HAD_SWCORE_PD_BITS, "switched core powered down" },
+        { POWMAN_CHIP_RESET_HAD_GLITCH_DETECT_BITS, "glitch detector" },
+        { POWMAN_CHIP_RESET_HAD_HZD_SYS_RESET_REQ_BITS, "SYSRESETREQ" },
+        { POWMAN_CHIP_RESET_HAD_WATCHDOG_RESET_PSM_BITS, "watchdog (PSM)" },
+    };
+    uint32_t chip = powman_hw->chip_reset, why = watchdog_hw->reason;
+    printf("  reset        : chip_reset 0x%08lx watchdog reason 0x%lx:", (unsigned long)chip,
+           (unsigned long)why);
+    for (size_t i = 0; i < sizeof causes / sizeof causes[0]; i++) {
+        if (chip & causes[i].bit) printf(" %s", causes[i].name);
+    }
+    if (why & WATCHDOG_REASON_TIMER_BITS) printf(", watchdog timer");
+    if (why & WATCHDOG_REASON_FORCE_BITS) printf(", watchdog forced");
+    printf("\n");
+}
+
 static unsigned timing_rx(uint32_t t) {
     return (t & QMI_M0_TIMING_RXDELAY_BITS) >> QMI_M0_TIMING_RXDELAY_LSB;
 }
@@ -206,6 +240,7 @@ void board_log_banner(const board_info_t *info) {
     printf("  module       : id=%s %s rev %u, %lu MB flash, temperature on ADC input %u\n",
            info->unique_id, info->chip, info->chip_version,
            (unsigned long)(info->flash_bytes >> 20), board_is_rp2350a() ? 4u : 8u);
+    log_reset();
     printf("  clocks       : clk_sys=%lu Hz clk_peri=%lu Hz, core rail ~%u mV\n",
            (unsigned long)info->clk_sys_hz, (unsigned long)info->clk_peri_hz, info->vreg_mv);
     unsigned fdiv = timing_div(info->qmi_timing);
