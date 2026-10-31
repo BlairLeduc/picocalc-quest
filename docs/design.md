@@ -31,7 +31,11 @@ and Ctrl+Alt+Del checked by the owner. M4 done: every engine to an
 interactive screen, the gate passed once upstream's screen copies went. M5
 done: PWM audio at 36,621 Hz with the mixer in the refill IRQ, by ear in
 one title per engine; DOSBox's OPL by default; Space Quest IV over the
-gate with audio, for M8 (§16, `milestones.md`). Upstream is pinned at commit
+gate with audio, for M8. M6 and M7 done: the pointer and full input;
+saves, settings, quit and exit. M8 done: rows copied and presented only
+when changed, hot code in SRAM, flash at 75 MHz, MAME's OPL by default
+and per game, Full Throttle's audio hold-off gone; the soak passed on
+battery with Fate of Atlantis (§16, `milestones.md`). Upstream is pinned at commit
 `949301b6ef87a5482340167378cd102fcdb82ef2` (2026-05-12, release 1.00).
 
 **Contents**
@@ -1365,7 +1369,9 @@ In measured steps, each against a control build in the same sitting
 play, not on a scene that runs unthrottled. Space Quest IV's intro animates
 as fast as core 0 allows and holds it at 100 % however fast the port gets
 (found in M8: 21 frames a second at 100 % before the row levers, 45 after);
-in play it is measured like the rest.
+in play it is measured like the rest. **75 % is a line to investigate,
+not a fail** (the owner, 2026-10-31): a title over it is looked into,
+and kept as it is when it plays well and no refill is late.
 
 Then a **30-minute soak** on battery, one title playing, keys typed over
 the UART for the whole run, with a script checking the log: one boot,
@@ -1374,6 +1380,17 @@ and the game visibly advancing (EL §11.5).
 
 **Done when** the soak passes and every lever is recorded as kept or
 dropped with its number.
+
+**Done** 2026-10-31 (`milestones.md`). Kept: the row levers (Fate of
+Atlantis 75 → 50 %, King's Quest I 51 → 11 %); SRAM tiers 1–4 (RAM
+286 KB of 448); flash at 75 MHz (1–2 points); MAME's OPL by default
+(the owner's ear), with `opl.<folder> = dosbox` per game, Day of the
+Tentacle 82.8 % on it. Dropped: SCI in mono (Space Quest IV 53.8 →
+39.5 %), for the stereo. Fixed: Full Throttle's audio hold-off (§8.2).
+Left: its porch scene and white movie patches (§19). The soak passed with
+Fate of Atlantis: 30 minutes on battery, none of 1,811 heartbeats
+missing, 0 late refills, I²C errors and dropped lines. Four runs with
+Space Quest IV stopped on a script bug of the game's at its start (§19).
 
 ### M9: Release
 
@@ -1467,6 +1484,13 @@ Every value the port depends on that has not been checked on this hardware
   patches of white in their backgrounds, in the frames as decoded (every
   row filled and sent). Both play correctly on the iPad's ScummVM. The
   owner stopped the chase there (2026-10-31): the game plays through.
+- **Space Quest IV's script error at its start** (found in M8): in room
+  25, script 701, `turnCycle` does arithmetic on an object, or the
+  interpreter's program counter goes astray, and the game stops; the
+  soak's walking and clicking near the rope as the droids arrive hit it
+  four times in about two hours. ScummVM's patch for its bug #6076,
+  ported, did not stop it. Next: log whether the patch matches this
+  copy's script.
 - **A save and load menu for SCUMM.** Its menu is ScummVM's GUI, which
   the build leaves out; Alt+1…9 and Ctrl+1…9 save and load, with no list
   and no names. If quick saves prove too little.

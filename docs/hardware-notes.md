@@ -426,6 +426,22 @@ power cycle (the PicoCalc trap of §6.1). With `init`, `reset halt`, `mww`,
 `program`, four flashings in a row, three of them with a game running,
 left it answering every time.
 
+**Setting the Debug Probe's UART again loses bytes in flight.** A
+second program that opens the port and sets it up (`stty`, the same
+115200 8-N-1 it already has) while a capture reads it makes the probe
+set its UART up again, and bytes on the way are lost. **Seen** on the
+same board, 2026-10-31: `keys.sh` set the port up on every key, about
+300 times in a 30-minute soak, and 4 whole heartbeat lines were missing
+from the capture while the firmware's log ring dropped none. Setting it
+up only when no other program holds it, the next two 30-minute runs lost
+none.
+
+**The chip's reset record outlives a debugger reset.** POWMAN's
+`CHIP_RESET` names the last reset of the whole chip, and OpenOCD's
+resets only the cores, so after a flash it still names the last
+power-on; the watchdog's `REASON` names a forced or timed watchdog
+reset. The banner prints both (found 2026-10-31).
+
 ---
 
 ## 3. Clocks, voltage and overclocking

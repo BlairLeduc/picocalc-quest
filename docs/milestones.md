@@ -4,6 +4,92 @@ What each milestone verified, on which board, on what date, and what was
 not checked, newest first. `design.md` §16 holds each milestone's scope
 and done-when criteria; this file keeps the full record.
 
+**M8 (performance pass and soak) is done**, on 2026-10-31, on the same
+Pimoroni Pico Plus 2 W in a PicoCalc, flashed over SWD, with Arm GCC
+15.2.Rel1 and SDK 2.3.1, development build. Each lever was measured
+against a control build in the same sitting, by scripted tours over the
+UART (`scripts/gate.sh`). The soak passed on battery with Fate of
+Atlantis, after four runs with Space Quest IV each stopped on a script
+bug of Sierra's (below). The owner made four calls: Space Quest IV
+judged on play; SCI kept in stereo, as they listen on headphones; MAME's
+OPL by default, set per game in `picocalc.ini`; and 75 % taken as a line
+to investigate, not a fail.
+
+**The levers**, kept or dropped, with core 0's busiest 5 s unless said:
+
+| Lever | Kept? | Measured |
+|---|---|---|
+| Copy and present only the rows that changed (§7.2) | kept | Fate of Atlantis 75 → 50 %, Space Quest III 76 → 67 %, King's Quest I 51 → 11 %; Space Quest IV's screen update 26 % (M5) → 2–5 %. The check build found no stale rows in eight titles |
+| Hot code in SRAM, four tiers (§12.1) | kept, all four | tier 1 (mixer, rate converter, OPL): the audio's share down a fifth or more (Space Quest IV 36.5 → 29.9 %); tier 2 (SCI's AdLib): about a point; tier 3 (SCI's interpreter): Space Quest IV waiting 17.4 → 9.5 %; tier 4 (the PSRAM heap): 7.7 %. RAM used 272 KB of 448, 286 KB with MAME's OPL added to tier 1 |
+| Flash at 75 MHz (§11.4) | kept | 1–2 points in every title (Day of the Tentacle 46.8 → 44.8 %, Fate of Atlantis 21.5 → 19.5 %). A read sweep found divider 4 intact at RX delays 1–7 (0 failed once in two boots); the default is the middle, 4 |
+| SCI's AdLib as one mono OPL2 (§8.3) | dropped, an option | Space Quest IV in play 53.8 → 39.5 %, its audio 28.4 → 12.8 %; the owner keeps the stereo |
+| MAME's OPL (§8.3) | kept, the default | in SRAM, still three to four times DOSBox's: Fate of Atlantis audio 42 % against 12 %, longest half 11.4 ms of 14.0; Day of the Tentacle 82.8 % at its busiest (DOSBox's: 50.4 %). `opl.<folder> = dosbox` per game |
+| Full Throttle's iMUSE lock across card reads (§8.2) | fixed | 163 ms and 3 late refills at a scene change (M5) → 0 late refills in 8 min 20 s through that scene |
+| Full Throttle's sheared movie frame (§19) | left | the cause found; the fix cured the shear but not the trails behind it, and was taken out |
+
+**The soak** (`scripts/soak.sh`, logs `out/m8-soak*.log`, not
+committed), 30 minutes on battery, the arrows held in turn and Enter
+pressed over the UART throughout:
+
+| Run | Title | Result |
+|---|---|---|
+| 1 | Space Quest IV | 0 late refills, I²C errors and dropped lines; 4 heartbeats lost between the probe and the Mac (`keys.sh`, below) |
+| 2, 3, 5 | Space Quest IV | stopped by the game's script error, then restarted by the soak's next key at the error page: twice, once, once |
+| 6 | Fate of Atlantis | **pass**: 1 boot, 1,811 heartbeats with none missing, 0 late refills, I²C errors and dropped lines, frames in every minute (28 a second); audio median 41 %, longest refill 10.3 ms; core 0 median 49 %, busiest 5 s 74 %; battery 91 %, 22 °C throughout |
+
+Run 4 never started: the soak waited for a boot that was not made.
+Since then `soak.sh` is started and the board reset by the probe.
+
+**The tour on MAME's OPL**, eight titles, busiest 5 s after loading:
+Day of the Tentacle 82.8 %, Fate of Atlantis 65.7 %, Kyrandia 56.3 %,
+Space Quest III 53.4 %, Full Throttle 56.3 %, Gobliiins 16.1 %, King's
+Quest I 9.5 %; Space Quest IV's intro 100 %, as always. No late refill;
+the PSRAM heap the same at every selector entry. In the soak's play,
+Space Quest IV reached 83.9 % (median 70.6 %), more than the 55.6 % of
+the shorter tour.
+
+**Found:**
+- **OpenOCD's reset leaves DMA and PWM running**, and with tier 2's
+  layout the audio ring sat in its flash work area: the speaker played
+  the flash buffers, loud. **A plain halt killed the southbridge** until
+  a power cycle, three times in four. `flash.sh` resets the cores, then
+  holds DMA and PWM in reset (HW §2.7).
+- **MAME's OPL plays one OPL2 only.** SCI asks for two in stereo, and
+  upstream then gave no emulator, so SCI fell to mono; the patched
+  `opl.cpp` gives the first emulator that can (§8.3).
+- **Every lock masks the audio IRQ**, including the timer manager's
+  around every timer callback; it and digital iMUSE's are taken on core
+  0's thread alone, and no longer lock (§8.2).
+- **Full Throttle's porch scene with Ripburger**: SMUSH leaves a movie's
+  last frame at the movie's pitch, and the room is not redrawn over it,
+  so the backdrop is sheared and the walkers leave trails. Some movies
+  also show white patches, in the frames as decoded. Both play right on
+  the iPad's ScummVM. The owner stopped the chase (§19). The knocks
+  heard in the scene are the game's, footsteps on a wooden porch.
+- **Kyrandia's loader walked the heap** and printed some 35 lines before
+  every archive: 792 dropped log lines at one launch. Taken out.
+- **`keys.sh` lost log lines**: it set the port up on every call, and the
+  Debug Probe then set its UART up again. It leaves a held port alone
+  now; 0 lost in the last two runs.
+- **Space Quest IV's start, the rope and the droids**: in room 25,
+  script 701, `turnCycle` does arithmetic on an object (three times) and
+  once the interpreter's program counter went astray, each stopping the
+  game; once also unattended after a soak. ScummVM's patch for its bug
+  #6076 (`droidShoots`), ported, did not stop it: either it does not
+  match this copy or the cause is another. Not fixed (§19).
+- **No restart had a reason in the log**: the banner now names the
+  chip's last reset (power-on, brown-out, debugger, watchdog forced, and
+  the rest). It showed the soak's restarts were the error page's, not a
+  crash or the power.
+- The SRAM heap reads 4 B after Full Throttle and stays there, without
+  growing; M5 showed it once. Likely a one-time allocation.
+
+**Not checked:** the release build; the Plus 2; Space Quest IV's patch
+against its script; the white patches' cause; a soak on battery of any
+title but Fate of Atlantis and Space Quest IV; the fault handler's crash
+record, which reads a constant junk value after every boot and so does
+not survive a restart.
+
 **M7 (saves, settings, quit and exit) is done**, on 2026-10-30, on the
 same Pimoroni Pico Plus 2 W in a PicoCalc, flashed over SWD, and on a
 Pimoroni Pico Plus 2 started from the PicoCalc shell under UF2 Loader,
