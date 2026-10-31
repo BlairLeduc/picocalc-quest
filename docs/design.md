@@ -564,8 +564,11 @@ SRAM (MAME's tables, about 136 KB, stay in the PSRAM heap) and measured
 again in the same sitting: in Fate of Atlantis MAME's audio share was
 42 % against DOSBox's 12 %, its longest half 11.4 ms of 14.0; in
 Kyrandia 29 % against 8 %. Most games have the room, so **MAME's is the
-default** (the owner, 2026-10-31) and `opl = dosbox` is there for a game
-that does not. MAME's emulates one OPL2 only; SCI asks for two in stereo,
+default** (the owner, 2026-10-31), and `opl.<folder> = dosbox` gives a
+game that does not DOSBox's, by its folder in `/quest`, up to 16 games
+(`opl = dosbox` for all). An eight-title tour on MAME's: Day of the
+Tentacle's busiest 5 s 82.8 % (audio 44.5 %, longest half 12.0 ms),
+Fate of Atlantis 65.7 %, Kyrandia 56.3 %; no late refill. MAME's emulates one OPL2 only; SCI asks for two in stereo,
 and upstream then gives no emulator and SCI falls back to one in mono. The
 patched `opl.cpp` gives the first emulator that can instead, so SCI plays
 DOSBox's in stereo whichever is chosen (Space Quest III, audio 23 % either
@@ -799,6 +802,7 @@ scumm_mode    = pointer
 kyra_mode     = pointer
 gob_mode      = pointer
 opl           = mame     the OPL (AdLib) emulator: mame or dosbox (§8.3)
+opl.dott      = dosbox   the same for one game, by its folder in /quest
 ```
 
 Keys and words are in any case; blank lines and lines starting `#` or `;`

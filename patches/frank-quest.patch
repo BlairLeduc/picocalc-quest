@@ -1146,7 +1146,7 @@
  
      printf("GOB: Creating engine instance...\n");
  
-@@ -378,9 +522,14 @@
+@@ -378,10 +522,15 @@
  static bool launchAGIGame(const char *gamePath) {
      printf("AGI: Attempting to launch game from %s\n", gamePath);
  
@@ -1156,12 +1156,13 @@
      // Set up the game path in config manager
      ConfMan.set("path", gamePath);
 -    ConfMan.setActiveDomain("quest-agi");
-+
+ 
 +    // PicoCalc: AGI's own save and restore screens, as SCI's (below).
 +    ConfMan.setBool("originalsaveload", true);
- 
++
      // Set default audio/config values that Engine::syncSoundSettings() expects
      ConfMan.setInt("music_volume", 192);
+     ConfMan.setInt("sfx_volume", 192);
 @@ -578,8 +727,9 @@
             gameId == 1 ? "Kyrandia 2 (Hand of Fate)" : "Kyrandia 1 (Legend of Kyrandia)",
             gamePath);
@@ -1275,7 +1276,7 @@
  
      ConfMan.setInt("music_volume", 192);
      ConfMan.setInt("sfx_volume", 192);
-@@ -1028,6 +1198,10 @@
+@@ -1028,12 +1198,21 @@
      ConfMan.registerDefault("language",                        "en");
      ConfMan.registerDefault("gfx_mode",                        "normal");
      ConfMan.registerDefault("render_mode",                     "");
@@ -1286,7 +1287,18 @@
  }
  
  // Dispatch a QuestGame to the engine launcher it belongs to. Returns
-@@ -1164,11 +1338,16 @@
+ // true if the engine reported success; false means the engine refused
+ // to start (bad files, unsupported variant, etc.).
+ static bool dispatchGame(const QuestGame &g) {
++    // PicoCalc: the OPL emulator for this game, by its folder in /quest,
++    // from picocalc.ini (picocalc-quest design.md §8.3, §10.3).
++    const char *folder = strrchr(g.dirPath, '/');
++    folder = folder ? folder + 1 : g.dirPath;
++    ConfMan.registerDefault("opl_driver", settings_opl_driver(settings_opl_for(&g_settings, folder)));
+     switch (g.engine) {
+     case QuestEngine::Scumm:
+         return launchScummGame(g.dirPath);
+@@ -1164,11 +1343,16 @@
          // selector frame and the device looks frozen.
          frank_quest_show_loading(g);
  
