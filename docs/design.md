@@ -271,9 +271,9 @@ The expected patch, to be confirmed at M0:
 | `src/board_config.h` | M1/M2 layouts replaced by one PicoCalc block. |
 | `drivers/sdcard/sdcard.c` | `CLK_FAST` made overridable, set to 25 MHz (§10). Its `get_fattime()` (always 0) compiled out in favour of the PicoCalc one (§13.2). |
 | `src/backends/platform/rp2350/rp2350-system.cpp` | `updateScreen()` copies and publishes a frame only when something shown has changed, and hands its own surface to `cabal_update_screen()` in place of a second copy (§7.2; M4). `logMessage()` passes an error's message to the error page (§13.1; M4). `initBackend()` creates the mixer at the audio shim's rate, not a literal 44,100 Hz (§8.2; M5, found in M0); `lockMutex()` masks the audio IRQ by one depth count, with barriers, and does nothing inside the IRQ (§8.2; found in M5). `getTimeAndDate()` asks the PicoCalc clock, keeping upstream's made-up date as the fallback (§13.2; M7). `warpMouse()` moves the poll's place as well as the cursor (§9.3; found in M7). |
-| `src/frank_quest_main.cpp` | The Gob, SCI and Kyra launchers look the folder's game up in the engine's own ScummVM table, by its files' MD5s and sizes, and launch with that entry; upstream fixes one version per game, whatever the files (§10.2; M4). Every game gets its own config domain, `quest-<folder>`, so its own saves (AGI in M4, the rest in M7), and SCI and AGI use the games' own save screens (§10.2; M7). The OPL emulator is `picocalc.ini`'s, as upstream's `opl_driver` default (§8.3, §10.3; M8). |
+| `src/frank_quest_main.cpp` | The Gob, SCI and Kyra launchers look the folder's game up in the engine's own ScummVM table, by its files' MD5s and sizes, and launch with that entry; upstream fixes one version per game, whatever the files (§10.2; M4). Every game gets its own config domain, `quest-<folder>`, so its own saves (AGI in M4, the rest in M7), and SCI and AGI use the games' own save screens (§10.2; M7). The OPL emulator is `picocalc.ini`'s, as upstream's `opl_driver` default (§8.3, §10.3; M8), and so are subtitles, which upstream turned on for every game (§10.3; M8). |
 | `src/backends/events/default/default-events.cpp` | No key repeats of the arrows and diagonals (§9.1; found in M5). |
-| `src/frank_quest_selector.cpp` | More AGI games by folder name (§10.2; M4). Esc leaves, and the legend names where to (§13.3; M7). To come: text that names PS/2, mouse clicks or HDMI, with `src/frank_quest_welcome.cpp`. |
+| `src/frank_quest_selector.cpp` | More AGI games by folder name (§10.2; M4), and The Dig, with `src/frank_quest_main.cpp`'s SCUMM table (M8). Esc leaves, and the legend names where to (§13.3; M7). To come: text that names PS/2, mouse clicks or HDMI, with `src/frank_quest_welcome.cpp`. |
 | `src/engines/gob/detection/detection.cpp`, `src/engines/sci/detection.cpp`, `src/engines/kyra/detection.cpp` | A function returning the engine's ScummVM table, which is `static` (M4). |
 | `src/backends/timer/default/default-timer.h`, `src/engines/scumm/imuse_digi/dimuse.h` | The timer manager's and digital iMUSE's locks left out, so they do not mask the audio IRQ across card reads (§8.2; M8). |
 | `src/engines/kyra/resource.cpp` | No heap walk before each archive: some 35 lines an archive overran the UART, dropping log lines at every Kyrandia launch (792 in one), and the walk masks the audio IRQ (§14.2; M8). |
@@ -808,7 +808,14 @@ kyra_mode     = pointer
 gob_mode      = pointer
 opl           = mame     the OPL (AdLib) emulator: mame or dosbox (§8.3)
 opl.dott      = dosbox   the same for one game, by its folder in /quest
+subtitles     = on       the games' text with their speech: on or off
+subtitles.dig = off      the same for one game, by its folder
 ```
+
+Up to 16 folders have settings of their own. Subtitles are on by default,
+as upstream's launchers had them for every game; they matter only to games
+with speech (SCUMM talkies, SCI CD titles, Kyrandia CD). A SCUMM game told
+to show no subtitles still shows them if its speech is muted.
 
 Keys and words are in any case; blank lines and lines starting `#` or `;`
 are comments, as is the rest of a value from a `#` or `;` after a space
@@ -1463,7 +1470,9 @@ Every value the port depends on that has not been checked on this hardware
 - **An in-game menu** (volume, pointer speed, mode, save settings). If the
   settings file proves awkward in use.
 - **Hardware vertical scroll.** Nothing scrolls in a way it would help.
-- **SCUMM v8 and The Dig.** When upstream builds them.
+- **SCUMM v8.** When upstream builds it. (The Dig, v7, was in upstream's
+  build all along, missing only from the two tables; it played 11 min in
+  M8 with 0 late refills.)
 - **AGI's busy-wait for a key** (found in M4). A script that asks "is a key
   pressed?" over and over within one cycle, as King's Quest III's help
   screen does, gets an event poll with no sleep each time, and core 0 runs
