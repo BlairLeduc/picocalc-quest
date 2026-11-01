@@ -988,10 +988,11 @@ tiers.
 
 ### 12.3 Flash
 
-About 3.6 MB of 16 MB (3,674 KB in M9's release build); nothing else is
-stored in flash. UF2 Loader's application partition must also hold it,
-and is smaller than the flash: the stock loader, built for a 4 MB Pico 2,
-gives 4,088 KB, which leaves about 410 KB (§17; HW §2.7).
+About 3.8 MB of 16 MB (3,770 KB in M9's release build); nothing else is
+stored in flash. UF2 Loader's application partition must also hold it. The
+shell's 16 MB loader build gives 16,372 KB, as read on the owner's board; the
+stock loader, built for a 4 MB Pico 2, gives 4,088 KB, which leaves about
+318 KB (§17; HW §2.7).
 
 ---
 
@@ -1171,7 +1172,9 @@ PicoCalc, so development follows EL §13.1 and HW §2.7:
   heartbeat in both builds; core 0 adds at boot whether UF2 Loader
   started the image, the image's size, and UF2 Loader's app partition's,
   from the bootrom's resident table (§12.3), which the development banner
-  also prints. `scripts/counters.sh` finds the block with `nm` and reads
+  also prints. Under UF2 Loader that reads 0 (M9): the loader calls
+  `rom_load_partition_table` first and the port makes no flash command to do
+  so, so the size is read with `picotool info -a` in BOOTSEL instead. `scripts/counters.sh` finds the block with `nm` and reads
   it with OpenOCD's `init` alone; `--watch` reads it every minute through
   a soak and checks the run (M9).
 
@@ -1463,7 +1466,7 @@ Tentacle 82.8 % on it. Dropped: SCI in mono (Space Quest IV 53.8 →
 Left: its porch scene, fixed since (§19). The soak passed with
 Fate of Atlantis: 30 minutes on battery, none of 1,811 heartbeats
 missing, 0 late refills, I²C errors and dropped lines. Four runs with
-Space Quest IV stopped on a script bug of the game's at its start (§19).
+Space Quest IV stopped on a script error at its start, later put down to a missing `701.HEP` (§19).
 
 ### M9: Release
 
@@ -1477,6 +1480,11 @@ Space Quest IV stopped on a script bug of the game's at its start (§19).
 
 **Done when** the release UF2 boots from UF2 Loader and from BOOTSEL, a
 title from each engine plays, and the documents describe what shipped.
+
+**Done** 2026-11-01 (`milestones.md`). Both boards, both routes, a title per
+engine, several hours by hand on battery. The soak with counters ran on the
+Plus 2 W: 0 I²C errors and lost keys, and 3 late refills, cause not looked
+for, which the owner heard nothing of and accepted for 1.0.
 
 ---
 
@@ -1495,7 +1503,7 @@ Every value the port depends on that has not been checked on this hardware
 | Ctrl+Alt+Del delivered by the MCU | yes | used on the keyboard by the owner, M3 | high | Confirmed 2026-10-29 |
 | Mixer half fits 14 ms with OPL at 300 MHz | yes, with DOSBox's OPL | longest half 7.8 ms over every engine (M5); MAME's 10.8 ms in one intro | high | Confirmed 2026-10-29 |
 | PSRAM frame read cost | hidden behind the wire; 6 % of core 0 by DMA | measured, M2 (§7.3) | high | Confirmed 2026-10-29; M8 measures under engines |
-| UF2 Loader's app partition holds the image (3,674 KB) | yes; 4,088 KB, the stock loader's (flash 4 MB less 8 KB) | read from UF2 Loader's source; the banner reports it (M9) | medium | M9 |
+| UF2 Loader's app partition holds the image (3,770 KB) | yes; 16,372 KB on the shell's 16 MB loader, 4,088 KB on the stock 4 MB one | `picotool info -a` on the owner's board (M9); the stock size from UF2 Loader's source | high for the shell's build, medium for stock | M9 |
 | POWMAN timer unaffected by the move to 300 MHz | yes | read either side of the switch, M1 | high | Confirmed 2026-10-29 |
 | Shell's clock record survives into the port and reads correctly | yes | read at boot, M1, after a reset over SWD; a launch from the shell gave a save the shell's local time, M7 | high | Confirmed 2026-10-30 |
 | Upstream's SRAM use leaves room for the port | yes; 342,920 bytes left | measured, M0 build | high | Confirmed 2026-10-29 |
@@ -1522,6 +1530,12 @@ Every value the port depends on that has not been checked on this hardware
 
 **Dropped**, with reasons, so they are not re-planned (EL §14.5):
 
+- **Space Quest IV's script error at its start.** Found in M8, in room 25,
+  script 701: `turnCycle` doing arithmetic on an object, or the program
+  counter going astray, four times in about two hours of soak. The card had
+  `701.SCR` without `701.HEP`. With every `.HEP` copied, the owner played that
+  room many times on the release build with no error (M9). Intermittent, so
+  not proof; reopen it if it comes back with the files in place.
 - **Full Throttle's white movie patches.** Reported in M8 and never real:
   the owner withdrew the report on 2026-11-01, having thought they saw
   them. Nothing to look for.
@@ -1568,13 +1582,6 @@ Every value the port depends on that has not been checked on this hardware
   base: `getPixels(0, 0)` adds `xstart`, which the zero format had
   half hidden. Every movie in the test was at `xstart` 0, so the base
   half has not run in a scrolled room.
-- **Space Quest IV's script error at its start** (found in M8): in room
-  25, script 701, `turnCycle` does arithmetic on an object, or the
-  interpreter's program counter goes astray, and the game stops; the
-  soak's walking and clicking near the rope as the droids arrive hit it
-  four times in about two hours. ScummVM's patch for its bug #6076,
-  ported, did not stop it. Next: log whether the patch matches this
-  copy's script.
 - **A save and load menu for SCUMM.** Its menu is ScummVM's GUI, which
   the build leaves out; Alt+1…9 and Ctrl+1…9 save and load, with no list
   and no names. If quick saves prove too little.

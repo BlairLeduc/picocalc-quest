@@ -7,7 +7,9 @@ adventure engine for the RP2350, to the PicoCalc's screen, keyboard,
 speakers and SD card.
 
 You supply the games. Copy the data files of games you own onto the card,
-pick one from the list, and play.
+pick one from the list, and play. Copy all of a game's files: a missing
+patch file, such as a Sierra game's `.HEP`, can stop a game with a script
+error.
 
 ## What you need
 
@@ -27,10 +29,18 @@ Either:
 
 - **With UF2 Loader**: copy the `.uf2` to the card and choose it from the
   loader's menu or the shell. Esc in the game list then goes back to the
-  shell.
-- **From BOOTSEL**: hold BOOTSEL on the Plus 2 while plugging it into a
-  computer, and copy the `.uf2` to the drive that appears. Esc in the game
+  shell. This is the way to install on a board that already has the loader.
+- **From BOOTSEL, with no loader**: hold BOOTSEL on the Plus 2 while
+  plugging it into a computer, and copy the `.uf2` to the drive that
+  appears. The drive goes away by itself when the copy ends. Esc in the game
   list then switches the PicoCalc off.
+
+With UF2 Loader installed, a BOOTSEL copy goes into the loader's program
+area instead of replacing it. In testing, one such copy from a Mac stopped
+early and left the program damaged. If that happens, install from the card,
+or erase the flash first (Raspberry Pi's `flash_nuke.uf2`), which removes the
+loader too. The shell's own loader build starts the shell at power-on; hold
+Up, F1 or F5 to start the game instead.
 
 ## The card
 
@@ -61,16 +71,14 @@ folder. Beneath a Steel Sky needs `sky.dsk`, `sky.dnr` and ScummVM's
 | KYRA | Westwood: The Legend of Kyrandia, Hand of Fate |
 | SKY | Revolution: Beneath a Steel Sky |
 
-Played on the PicoCalc during development: The Last Crusade, Fate of
-Atlantis, Day of the Tentacle, Full Throttle and The Dig; Space Quest III and IV; King's Quest I
-and III (AGI) and Space Quest II; Gobliiins, Gobliins 2 and Goblins 3;
-Kyrandia; Beneath a Steel Sky. Other titles of these engines should run
-but have not been tried.
+Played on the PicoCalc: The Last Crusade, Fate of Atlantis, Day of the
+Tentacle, Full Throttle and The Dig; King's Quest I to III and Space Quest I
+to V; Gobliiins, Gobliins 2 and Goblins 3; Kyrandia and Hand of Fate;
+Beneath a Steel Sky. Other titles of these engines should run but have not
+been tried.
 
 Known problems:
 
-- **Space Quest IV** can stop with a script error near its start, in the
-  room where the droids arrive.
 - **CD versions of the Gob games** play without music: it is on CD audio
   tracks, which the engine cannot play.
 - **SCUMM v8** (The Curse of Monkey Island) is not built.
