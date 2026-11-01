@@ -854,6 +854,31 @@
  // Display Configuration
  //=============================================================================
  
+--- a/src/engines/agi/global.cpp
++++ b/src/engines/agi/global.cpp
+@@ -20,6 +20,8 @@
+  *
+  */
+ 
++#include "common/config-manager.h"
++
+ #include "agi/agi.h"
+ 
+ namespace Agi {
+@@ -53,7 +55,12 @@
+ 
+ 	if (var == vVolume) {
+ 		_mixer->setVolumeForSoundType(Audio::Mixer::kSFXSoundType, val * 17);
+-		_mixer->setVolumeForSoundType(Audio::Mixer::kMusicSoundType, val * 17);
++		// PicoCalc: the script's level scaled by picocalc.ini's, with
++		// the default, 192, the script's own (picocalc-quest design.md
++		// §10.3). Set plainly, it overwrote the setting. AGI's games
++		// play everything as music, so SFX has nothing to scale.
++		_mixer->setVolumeForSoundType(Audio::Mixer::kMusicSoundType,
++			MIN(val * 17 * ConfMan.getInt("music_volume") / 192, 255));
+ 	}
+ }
+ 
 --- a/src/engines/gob/detection/detection.cpp
 +++ b/src/engines/gob/detection/detection.cpp
 @@ -223,3 +223,9 @@
@@ -988,12 +1013,10 @@
  #include "common/archive.h"
  
  // GOB Engine includes
-@@ -233,8 +238,28 @@
- 
-     printf("GOB Detection: No known files found\n");
+@@ -235,6 +240,29 @@
      return 0;  // Unknown
-+}
-+
+ }
+ 
 +// PicoCalc: a config domain per game folder, quest-<folder>. Engines name
 +// their save files after the domain, and upstream's one domain per engine
 +// gave every SCUMM game the same quest-scumm.s01, so one game's save
@@ -1007,17 +1030,20 @@
 +        if (!Common::isAlnum(domain[i]) && domain[i] != '-' && domain[i] != '_')
 +            domain.setChar('_', i);
 +    ConfMan.setActiveDomain(domain);
- }
- 
++}
++
 +// PicoCalc: whether the game being launched shows its text with its
 +// speech, from picocalc.ini (picocalc-quest design.md §10.3); set by
 +// dispatchGame() before the launcher runs.
 +static bool s_subtitles = true;
++// PicoCalc: the game's volumes, talkspeed and tempo, from picocalc.ini
++// (picocalc-quest design.md §10.3), set by dispatchGame.
++static unsigned s_number[SETTINGS_NUMBERS];
 +
  // Forward declaration
  static bool launchGOBGameWithVersion(const char *gamePath, int gobVersion);
  
-@@ -257,12 +282,127 @@
+@@ -257,17 +285,132 @@
  
  // GOB (Gobliins) game launcher with explicit version
  // Returns true if a game was found and launched
@@ -1145,8 +1171,16 @@
 -    ConfMan.setActiveDomain("quest-gob");
  
      // Set default audio/config values that Engine::syncSoundSettings() expects
-     ConfMan.setInt("music_volume", 192);
-@@ -283,13 +423,14 @@
+-    ConfMan.setInt("music_volume", 192);
+-    ConfMan.setInt("sfx_volume", 192);
+-    ConfMan.setInt("speech_volume", 192);
++    ConfMan.setInt("music_volume", s_number[SETTINGS_MUSIC_VOLUME]);
++    ConfMan.setInt("sfx_volume", s_number[SETTINGS_SFX_VOLUME]);
++    ConfMan.setInt("speech_volume", s_number[SETTINGS_SPEECH_VOLUME]);
+     ConfMan.setBool("mute", false);
+     ConfMan.setBool("speech_mute", false);
+     ConfMan.setBool("sfx_mute", false);
+@@ -283,13 +426,14 @@
      ConfMan.setBool("enable_gs", false);
      ConfMan.setBool("multi_midi", false);
      ConfMan.setInt("midi_gain", 100);
@@ -1163,7 +1197,7 @@
  
      // Graphics settings
      ConfMan.set("gfx_mode", "normal");
-@@ -326,7 +467,13 @@
+@@ -326,7 +470,13 @@
      memset(&gameDesc, 0, sizeof(gameDesc));
  
      // Set up the ADGameDescription part based on detected version
@@ -1178,7 +1212,7 @@
          gameDesc.desc.gameid = "gob3";
          gameDesc.desc.extra = "VGA";
          gameDesc.gameType = Gob::kGameTypeGob3;
-@@ -346,13 +493,15 @@
+@@ -346,13 +496,15 @@
          printf("GOB: Configuring for Gobliiins 1 (EGA)\n");
      }
  
@@ -1201,7 +1235,7 @@
  
      printf("GOB: Creating engine instance...\n");
  
-@@ -378,10 +527,15 @@
+@@ -378,14 +530,19 @@
  static bool launchAGIGame(const char *gamePath) {
      printf("AGI: Attempting to launch game from %s\n", gamePath);
  
@@ -1216,9 +1250,16 @@
 +    ConfMan.setBool("originalsaveload", true);
 +
      // Set default audio/config values that Engine::syncSoundSettings() expects
-     ConfMan.setInt("music_volume", 192);
-     ConfMan.setInt("sfx_volume", 192);
-@@ -399,7 +553,7 @@
+-    ConfMan.setInt("music_volume", 192);
+-    ConfMan.setInt("sfx_volume", 192);
+-    ConfMan.setInt("speech_volume", 192);
++    ConfMan.setInt("music_volume", s_number[SETTINGS_MUSIC_VOLUME]);
++    ConfMan.setInt("sfx_volume", s_number[SETTINGS_SFX_VOLUME]);
++    ConfMan.setInt("speech_volume", s_number[SETTINGS_SPEECH_VOLUME]);
+     ConfMan.setBool("mute", false);
+     ConfMan.setBool("speech_mute", false);
+     ConfMan.setInt("autosave_period", 0);  // Disable autosave on embedded
+@@ -399,7 +556,7 @@
      ConfMan.setBool("enable_gs", false);
      ConfMan.setBool("multi_midi", false);
      ConfMan.setInt("midi_gain", 100);
@@ -1227,7 +1268,7 @@
      ConfMan.setInt("talkspeed", 60);
  
      // Load all plugins (engine and music) before creating the engine
-@@ -578,8 +732,9 @@
+@@ -578,13 +735,14 @@
             gameId == 1 ? "Kyrandia 2 (Hand of Fate)" : "Kyrandia 1 (Legend of Kyrandia)",
             gamePath);
  
@@ -1237,8 +1278,16 @@
 -    ConfMan.setActiveDomain("quest-kyra");
  
      // Audio/config defaults
-     ConfMan.setInt("music_volume", 192);
-@@ -595,7 +750,7 @@
+-    ConfMan.setInt("music_volume", 192);
+-    ConfMan.setInt("sfx_volume", 192);
+-    ConfMan.setInt("speech_volume", 192);
++    ConfMan.setInt("music_volume", s_number[SETTINGS_MUSIC_VOLUME]);
++    ConfMan.setInt("sfx_volume", s_number[SETTINGS_SFX_VOLUME]);
++    ConfMan.setInt("speech_volume", s_number[SETTINGS_SPEECH_VOLUME]);
+     ConfMan.setBool("mute", false);
+     ConfMan.setBool("speech_mute", false);
+     ConfMan.setBool("sfx_mute", false);
+@@ -595,7 +753,7 @@
      ConfMan.set("gm_device", "null");
      ConfMan.set("mt32_device", "null");
      ConfMan.setBool("native_mt32", false);
@@ -1247,7 +1296,7 @@
      ConfMan.setInt("talkspeed", 60);
      ConfMan.set("language", "en");
      ConfMan.set("gfx_mode", "normal");
-@@ -614,20 +769,30 @@
+@@ -614,20 +772,30 @@
      static KYRAGameDescription gameDesc;
      memset(&gameDesc, 0, sizeof(gameDesc));
  
@@ -1291,7 +1340,7 @@
  
      printf("KYRA: Creating engine...\n");
      ::Engine *engine = (gameId == 1)
-@@ -708,8 +873,9 @@
+@@ -708,12 +876,13 @@
      printf("SCI: Launching game from %s (id=%s)\n", gamePath,
             gameIdStr ? gameIdStr : "(auto)");
  
@@ -1300,9 +1349,16 @@
      ConfMan.set("path", gamePath);
 -    ConfMan.setActiveDomain("quest-sci");
  
-     ConfMan.setInt("music_volume", 192);
-     ConfMan.setInt("sfx_volume", 192);
-@@ -727,7 +893,7 @@
+-    ConfMan.setInt("music_volume", 192);
+-    ConfMan.setInt("sfx_volume", 192);
+-    ConfMan.setInt("speech_volume", 192);
++    ConfMan.setInt("music_volume", s_number[SETTINGS_MUSIC_VOLUME]);
++    ConfMan.setInt("sfx_volume", s_number[SETTINGS_SFX_VOLUME]);
++    ConfMan.setInt("speech_volume", s_number[SETTINGS_SPEECH_VOLUME]);
+     ConfMan.setBool("mute", false);
+     ConfMan.setBool("speech_mute", false);
+     ConfMan.setBool("sfx_mute", false);
+@@ -727,7 +896,7 @@
      ConfMan.setBool("enable_gs", false);
      ConfMan.setBool("multi_midi", false);
      ConfMan.setInt("midi_gain", 100);
@@ -1311,7 +1367,7 @@
      ConfMan.setInt("talkspeed", 60);
      ConfMan.set("language", "en");
      ConfMan.set("gfx_mode", "normal");
-@@ -736,7 +902,11 @@
+@@ -736,7 +905,11 @@
      // SCI-specific prefs
      ConfMan.setBool("copy_protection", false);
      ConfMan.setBool("prefer_digitalsfx", false);
@@ -1324,7 +1380,7 @@
      ConfMan.setBool("enable_black_lined_video", false);
      ConfMan.setBool("windows_cursors", false);
      ConfMan.setBool("silver_cursors", false);
-@@ -763,12 +933,16 @@
+@@ -763,12 +936,16 @@
  
      static ADGameDescription gameDesc;
      memset(&gameDesc, 0, sizeof(gameDesc));
@@ -1347,7 +1403,7 @@
  
      ConfMan.set("gameid", gameDesc.gameid);
  
-@@ -825,6 +999,7 @@
+@@ -825,6 +1002,7 @@
  // Full Throttle is digital-only (iMUSE Digital); it doesn't use the classic
  // MIDI synth chain and the detection table marks it MDT_NONE.
  #define CABAL_MIDI_FT       (0)
@@ -1355,7 +1411,7 @@
  
  static const ScummGameInfo kScummGames[] = {
      // --- SCUMM v4 (floppy, .LFL + DISK*.LEC) ---
-@@ -846,6 +1021,7 @@
+@@ -846,6 +1024,7 @@
      // --- SCUMM v7 (ft.la%d / dig.la%d) — digital audio + SMUSH video ---
      {"ft",       "ft",      "ft.la%d",       Scumm::kGenDiskNum, Scumm::GID_FT,         7, "",    CABAL_MIDI_FT,      0},
      {"fulltp",   "ft",      "ft.la%d",       Scumm::kGenDiskNum, Scumm::GID_FT,         7, "",    CABAL_MIDI_FT,      0},
@@ -1363,7 +1419,7 @@
  };
  
  static const ScummGameInfo *findScummGame(const char *gamePath) {
-@@ -867,8 +1043,9 @@
+@@ -867,12 +1046,13 @@
      printf("SCUMM: Launching %s (v%d, id=%s) from %s\n",
             info->gameid, info->version, info->gameid, gamePath);
  
@@ -1372,18 +1428,36 @@
      ConfMan.set("path", gamePath);
 -    ConfMan.setActiveDomain("quest-scumm");
  
-     ConfMan.setInt("music_volume", 192);
-     ConfMan.setInt("sfx_volume", 192);
-@@ -886,7 +1063,7 @@
+-    ConfMan.setInt("music_volume", 192);
+-    ConfMan.setInt("sfx_volume", 192);
+-    ConfMan.setInt("speech_volume", 192);
++    ConfMan.setInt("music_volume", s_number[SETTINGS_MUSIC_VOLUME]);
++    ConfMan.setInt("sfx_volume", s_number[SETTINGS_SFX_VOLUME]);
++    ConfMan.setInt("speech_volume", s_number[SETTINGS_SPEECH_VOLUME]);
+     ConfMan.setBool("mute", false);
+     ConfMan.setBool("speech_mute", false);
+     ConfMan.setBool("sfx_mute", false);
+@@ -886,8 +1066,8 @@
      ConfMan.setBool("enable_gs", false);
      ConfMan.setBool("multi_midi", false);
      ConfMan.setInt("midi_gain", 100);
 -    ConfMan.setBool("subtitles", true);
+-    ConfMan.setInt("talkspeed", 60);
 +    ConfMan.setBool("subtitles", s_subtitles);
-     ConfMan.setInt("talkspeed", 60);
++    ConfMan.setInt("talkspeed", s_number[SETTINGS_TALKSPEED]);
      ConfMan.set("language", "en");
      ConfMan.set("gfx_mode", "normal");
-@@ -1028,12 +1205,22 @@
+     ConfMan.setBool("aspect_ratio", false);
+@@ -906,7 +1086,7 @@
+     ConfMan.setInt("boot_param", 0);
+     ConfMan.setInt("save_slot", -1);
+     ConfMan.setInt("dimuse_tempo", 10);
+-    ConfMan.setInt("tempo", 0);
++    ConfMan.setInt("tempo", s_number[SETTINGS_TEMPO]);
+     ConfMan.set("render_mode", "");
+     ConfMan.set("easter_egg", "");
+ 
+@@ -1028,12 +1208,23 @@
      ConfMan.registerDefault("language",                        "en");
      ConfMan.registerDefault("gfx_mode",                        "normal");
      ConfMan.registerDefault("render_mode",                     "");
@@ -1403,10 +1477,11 @@
 +    folder = folder ? folder + 1 : g.dirPath;
 +    ConfMan.registerDefault("opl_driver", settings_opl_driver(settings_opl_for(&g_settings, folder)));
 +    s_subtitles = settings_subtitles_for(&g_settings, folder);
++    for (unsigned i = 0; i < SETTINGS_NUMBERS; i++) s_number[i] = settings_number_for(&g_settings, folder, i);
      switch (g.engine) {
      case QuestEngine::Scumm:
          return launchScummGame(g.dirPath);
-@@ -1164,11 +1351,16 @@
+@@ -1164,11 +1355,16 @@
          // selector frame and the device looks frozen.
          frank_quest_show_loading(g);
  

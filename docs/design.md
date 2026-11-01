@@ -800,7 +800,9 @@ with every default in one function (EL §8.7), `picocalc/settings.c`:
 left_button   = ]        one printable key; a letter in any case
 right_button  = [
 pointer_speed = 100      per cent of the curve of §9.3, 25-400
-volume        = 100      per cent of the mixer's level, 0-200
+music_volume  = 192      ScummVM's level for each kind of sound, 0-255
+sfx_volume    = 192
+speech_volume = 192
 agi_mode      = keys     what the arrows start as: pointer or keys
 sci_mode      = pointer
 scumm_mode    = pointer
@@ -810,7 +812,29 @@ opl           = mame     the OPL (AdLib) emulator: mame or dosbox (§8.3)
 opl.dott      = dosbox   the same for one game, by its folder in /quest
 subtitles     = on       the games' text with their speech: on or off
 subtitles.dig = off      the same for one game, by its folder
+talkspeed     = 60       SCUMM: how long text stays, 0-255, higher is longer
+tempo         = 100      SCUMM: iMUSE's music speed, per cent, 50-200
 ```
+
+The volumes, `talkspeed` and `tempo` take a folder too
+(`music_volume.kyr1 = 255`). They have ScummVM's names, ranges and
+defaults, which are what upstream's launchers set. Upstream builds neither
+Cabal's command line nor its `base/main.cpp`, so a Cabal option exists here
+only as the config key an engine reads, and is offered only where the path
+from that key to the sound or text was read through in the source:
+
+| Setting | Reaches | Does not reach |
+|---|---|---|
+| `music_volume` | All five engines' music, through the mixer or the engine's own OPL level. AGI's script variable overwrote it, so `AgiEngine::setvar` is patched to scale by it, 192 leaving the script's level as it was | |
+| `sfx_volume` | Sampled effects (SCUMM, SCI, Kyra, Gob) | Effects played as AdLib notes, which follow `music_volume`; AGI, whose sound is all music |
+| `speech_volume` | SCUMM talkies, digital iMUSE, SCI CD, Kyra CD | Games with no speech |
+| `talkspeed` | SCUMM only. Ten steps of `VAR_CHARINC`, 0-9; it overrides the game's own speed, as it always has, the launcher having set 60 | Other engines; Kyra reads the key and stays at 60 |
+| `tempo` | iMUSE MIDI: SCUMM v3-v6 with AdLib, such as Monkey Island 2, Fate of Atlantis, Day of the Tentacle, Sam & Max. It scales `MidiParser`'s timer rate | Digital iMUSE (Full Throttle, The Dig), CD audio, Loom's and Indiana Jones 3's AD player. `dimuse_tempo` is left out: it is the digital iMUSE's callback rate, not the music's speed |
+
+Music that a script waits on moves with `tempo`, so a far setting may
+change a scene's timing. The master gain stays at unity; a setting of 192
+is 75 % of the mixer's scale, so 255 is at most a third louder. The old
+`volume` is no longer a setting and is named as a line not used.
 
 Up to 16 folders have settings of their own. Subtitles are on by default,
 as upstream's launchers had them for every game; they matter only to games

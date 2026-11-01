@@ -42,7 +42,6 @@ void cabal_init(void);
 int cabal_main(void);
 void cabal_enable_psram_heap(void);
 void cabal_report_previous_crash(void);
-void cabal_audio_set_volume(int volume);
 
 /* Core 0's time in upstream's delay, for the heartbeat's busy share
  * (§14.3): the link wraps cabal_delay, so upstream's OSystem calls this
@@ -374,7 +373,6 @@ int main(void) {
     video_init();
     check_card();
     settings_load();
-    cabal_audio_set_volume(settings_gain(g_settings.volume));
 
     cabal_init();
     return cabal_main();

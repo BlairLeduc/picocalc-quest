@@ -100,7 +100,9 @@ starts a comment. Every setting and its default:
 left_button   = ]        any printable key
 right_button  = [
 pointer_speed = 100      per cent, 25-400
-volume        = 100      per cent, 0-200
+music_volume  = 192      0-255
+sfx_volume    = 192      0-255
+speech_volume = 192      0-255
 agi_mode      = keys     what the arrows start as: pointer or keys
 sci_mode      = pointer
 scumm_mode    = pointer
@@ -108,11 +110,18 @@ kyra_mode     = pointer
 gob_mode      = pointer
 opl           = mame     the AdLib emulator: mame or dosbox
 subtitles     = on       text with speech: on or off
+talkspeed     = 60       SCUMM: how long text stays, 0-255; higher is longer
+tempo         = 100      SCUMM: music speed, per cent, 50-200
 ```
 
-`opl` and `subtitles` can also be set for one game by its folder, for
-example `opl.dott = dosbox` (lighter on the processor) or
-`subtitles.dig = off`. A line the port cannot use is named on the status
+`opl`, `subtitles`, the volumes, `talkspeed` and `tempo` can also be set
+for one game by its folder, for example `opl.dott = dosbox` (lighter on the
+processor), `subtitles.dig = off` or `music_volume.kyr1 = 255`.
+
+Effects played as AdLib notes follow `music_volume`, not `sfx_volume`, and
+all AGI sound does. `tempo` affects games with iMUSE MIDI music, such as
+Monkey Island 2, Fate of Atlantis, Day of the Tentacle and Sam & Max; not
+Full Throttle or The Dig. A line the port cannot use is named on the status
 line when the game list first shows, and the rest of the file still
 applies.
 

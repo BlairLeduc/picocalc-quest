@@ -4,8 +4,8 @@
  * spacing, CRLF, a BOM and a last line with no end; a bad line named with
  * its number and text and the rest of the file applied; a bad value
  * leaving the setting as it was; the two buttons on one key; more bad
- * lines than there is room to describe; the volume's gain; the OPL
- * emulator; and subtitles.
+ * lines than there is room to describe; the OPL emulator; subtitles;
+ * and the volumes, talkspeed and tempo.
  */
 
 #include <stdio.h>
@@ -40,12 +40,12 @@ static unsigned parse(settings_t *s, const char *text) {
 static const char *show(const settings_t *s) {
     static char buf[96];
     snprintf(buf, sizeof buf, "%c%c %u %u %d%d%d%d%d", s->left_button, s->right_button,
-             s->pointer_speed, s->volume, s->pointer_mode[SCUMM], s->pointer_mode[SCI],
+             s->pointer_speed, s->number[SETTINGS_MUSIC_VOLUME], s->pointer_mode[SCUMM], s->pointer_mode[SCI],
              s->pointer_mode[KYRA], s->pointer_mode[GOB], s->pointer_mode[AGI]);
     return buf;
 }
 
-#define DEFAULTS "][ 100 100 11110"
+#define DEFAULTS "][ 100 192 11110"
 
 static void expect(const char *text, unsigned bad, const char *want) {
     settings_t s;
@@ -79,46 +79,46 @@ int main(void) {
     expect("# a comment\n; another\n   # indented\n", 0, DEFAULTS);
 
     /* Every key. */
-    expect("left_button = a\nright_button = b\n", 0, "ab 100 100 11110");
-    expect("pointer_speed = 25\n", 0, "][ 25 100 11110");
-    expect("pointer_speed = 400\n", 0, "][ 400 100 11110");
-    expect("volume = 0\n", 0, "][ 100 0 11110");
-    expect("volume = 200\n", 0, "][ 100 200 11110");
-    expect("scumm_mode = keys\n", 0, "][ 100 100 01110");
-    expect("sci_mode = keys\n", 0, "][ 100 100 10110");
-    expect("kyra_mode = keys\n", 0, "][ 100 100 11010");
-    expect("gob_mode = keys\n", 0, "][ 100 100 11100");
-    expect("agi_mode = pointer\n", 0, "][ 100 100 11111");
+    expect("left_button = a\nright_button = b\n", 0, "ab 100 192 11110");
+    expect("pointer_speed = 25\n", 0, "][ 25 192 11110");
+    expect("pointer_speed = 400\n", 0, "][ 400 192 11110");
+    expect("music_volume = 0\n", 0, "][ 100 0 11110");
+    expect("music_volume = 255\n", 0, "][ 100 255 11110");
+    expect("scumm_mode = keys\n", 0, "][ 100 192 01110");
+    expect("sci_mode = keys\n", 0, "][ 100 192 10110");
+    expect("kyra_mode = keys\n", 0, "][ 100 192 11010");
+    expect("gob_mode = keys\n", 0, "][ 100 192 11100");
+    expect("agi_mode = pointer\n", 0, "][ 100 192 11111");
 
     /* Case, spacing, line ends, a BOM, no last line end. */
-    expect("LEFT_BUTTON=Q", 0, "q[ 100 100 11110");
-    expect("  Volume\t=\t50  \r\nAGI_MODE = POINTER\r\n", 0, "][ 100 50 11111");
-    expect("\xEF\xBB\xBFvolume = 75\n", 0, "][ 100 75 11110");
+    expect("LEFT_BUTTON=Q", 0, "q[ 100 192 11110");
+    expect("  Music_Volume\t=\t50  \r\nAGI_MODE = POINTER\r\n", 0, "][ 100 50 11111");
+    expect("\xEF\xBB\xBFmusic_volume = 75\n", 0, "][ 100 75 11110");
     /* Comments after a value, and keys that are comment characters. */
-    expect("volume = 80   # quieter\n", 0, "][ 100 80 11110");
-    expect("volume = 80 ; quieter\n", 0, "][ 100 80 11110");
-    expect("left_button = #\nright_button = ;\n", 0, "#; 100 100 11110");
-    expect("left_button = #  # the hash key\n", 0, "#[ 100 100 11110");
+    expect("music_volume = 80   # quieter\n", 0, "][ 100 80 11110");
+    expect("music_volume = 80 ; quieter\n", 0, "][ 100 80 11110");
+    expect("left_button = #\nright_button = ;\n", 0, "#; 100 192 11110");
+    expect("left_button = #  # the hash key\n", 0, "#[ 100 192 11110");
     expect("left_button = # the hash key\n", 1, DEFAULTS);
-    expect("left_button = =\n", 0, "=[ 100 100 11110");
+    expect("left_button = =\n", 0, "=[ 100 192 11110");
     /* The later of two wins; swapping the buttons is not a clash. */
-    expect("volume = 10\nvolume = 20\n", 0, "][ 100 20 11110");
-    expect("left_button = [\nright_button = ]\n", 0, "[] 100 100 11110");
+    expect("music_volume = 10\nmusic_volume = 20\n", 0, "][ 100 20 11110");
+    expect("left_button = [\nright_button = ]\n", 0, "[] 100 192 11110");
 
     /* Bad lines: named, the rest applied, the setting left as it was. */
-    expect("volume = 50\nvolme = 3\npointer_speed = 200\n", 1, "][ 200 50 11110");
-    expect_error("volume = 50\nvolme = 3\npointer_speed = 200\n", 0, 2, "no such setting",
+    expect("music_volume = 50\nvolme = 3\npointer_speed = 200\n", 1, "][ 200 50 11110");
+    expect_error("music_volume = 50\nvolme = 3\npointer_speed = 200\n", 0, 2, "no such setting",
                  "volme = 3");
     expect_error("a\r\nvolume\r\n", 0, 1, "no = in it", "a");
     expect_error("a\r\nvolume\r\n", 1, 2, "no = in it", "volume");
     expect_error("\n = 3\n", 0, 2, "no name before the =", " = 3");
-    expect_error("volume =   \n", 0, 1, "no value after the =", "volume =   ");
-    expect_error("volume = # none\n", 0, 1, "a number, 0 to 200", "volume = # none");
-    expect("volume = 201\n", 1, DEFAULTS);
-    expect("volume = -1\n", 1, DEFAULTS);
-    expect("volume = 5x\n", 1, DEFAULTS);
-    expect("volume = 99999999\n", 1, DEFAULTS);
-    expect_error("volume = 201\n", 0, 1, "a number, 0 to 200", "volume = 201");
+    expect_error("music_volume =   \n", 0, 1, "no value after the =", "music_volume =   ");
+    expect_error("music_volume = # none\n", 0, 1, "a number, 0 to 255", "music_volume = # none");
+    expect("music_volume = 256\n", 1, DEFAULTS);
+    expect("music_volume = -1\n", 1, DEFAULTS);
+    expect("music_volume = 5x\n", 1, DEFAULTS);
+    expect("music_volume = 99999999\n", 1, DEFAULTS);
+    expect_error("music_volume = 256\n", 0, 1, "a number, 0 to 255", "music_volume = 256");
     expect("pointer_speed = 24\n", 1, DEFAULTS);
     expect("pointer_speed = 401\n", 1, DEFAULTS);
     expect_error("pointer_speed = 0\n", 0, 1, "a number, 25 to 400", "pointer_speed = 0");
@@ -128,27 +128,27 @@ int main(void) {
     expect("left_button = \x7f\n", 1, DEFAULTS);
     expect_error("left_button = ab\n", 0, 1, "one printable key", "left_button = ab");
     /* A value with a space in it is not a comment's start. */
-    expect("volume = 5 0\n", 1, DEFAULTS);
+    expect("music_volume = 5 0\n", 1, DEFAULTS);
 
     /* The buttons on one key: the later line is not used. */
     expect("left_button = [\n", 1, DEFAULTS);
     expect_error("left_button = [\n", 0, 1, "the other button's key", "left_button = [");
-    expect("left_button = x\nright_button = X\n", 1, "x[ 100 100 11110");
+    expect("left_button = x\nright_button = X\n", 1, "x[ 100 192 11110");
     expect_error("left_button = x\nright_button = X\n", 0, 2, "the other button's key",
                  "right_button = X");
-    expect("right_button = x\nleft_button = x\n", 1, "]x 100 100 11110");
+    expect("right_button = x\nleft_button = x\n", 1, "]x 100 192 11110");
     /* Right on left's default, left never set: right goes back. */
     expect("right_button = ]\n", 1, DEFAULTS);
     /* Both on [ : right's default is [ too, so it takes left's. */
-    expect("left_button = [\nright_button = [\n", 1, "[] 100 100 11110");
+    expect("left_button = [\nright_button = [\n", 1, "[] 100 192 11110");
 
     /* More bad lines than room: all counted, the first described. */
     {
-        const char *text = "a\nb\nc\nd\ne\nf\nvolume = 1\n";
+        const char *text = "a\nb\nc\nd\ne\nf\nmusic_volume = 1\n";
         unsigned n = parse(&s, text);
         CHECK(n == 6, "six bad lines, got %u", n);
         CHECK(errs[3].line == 4, "the fourth error on line 4, got %u", errs[3].line);
-        CHECK(s.volume == 1, "the good line after them applied, volume %u", s.volume);
+        CHECK(s.number[SETTINGS_MUSIC_VOLUME] == 1, "the good line after them applied, music %u", s.number[SETTINGS_MUSIC_VOLUME]);
     }
 
     /* The OPL emulator: MAME's by default, either by name in any case,
@@ -227,12 +227,45 @@ int main(void) {
     expect_error("subtitles.dig = no\n", 0, 1, "on or off", "subtitles.dig = no");
     expect("subtitles = on\n", 0, DEFAULTS);
 
-    /* The volume to upstream's gain, 128 at 100 %. */
-    CHECK(settings_gain(0) == 0, "gain(0) = %d", settings_gain(0));
-    CHECK(settings_gain(100) == 128, "gain(100) = %d", settings_gain(100));
-    CHECK(settings_gain(50) == 64, "gain(50) = %d", settings_gain(50));
-    CHECK(settings_gain(199) == 255, "gain(199) = %d", settings_gain(199));
-    CHECK(settings_gain(200) == 255, "gain(200) = %d", settings_gain(200));
+    /* The numbers: ScummVM's defaults, ranges and names, a game's own by
+     * folder, sharing the game's entry; a bad one leaves the setting. */
+    {
+        settings_t s;
+        parse(&s, "");
+        CHECK(s.number[SETTINGS_MUSIC_VOLUME] == 192 && s.number[SETTINGS_SFX_VOLUME] == 192 &&
+              s.number[SETTINGS_SPEECH_VOLUME] == 192, "volumes' default");
+        CHECK(s.number[SETTINGS_TALKSPEED] == 60 && s.number[SETTINGS_TEMPO] == 100, "scumm's default");
+        CHECK(parse(&s, "music_volume = 1\nsfx_volume = 2\nspeech_volume = 3\n"
+                        "talkspeed = 4\ntempo = 50\n") == 0 &&
+              s.number[SETTINGS_MUSIC_VOLUME] == 1 && s.number[SETTINGS_SFX_VOLUME] == 2 &&
+              s.number[SETTINGS_SPEECH_VOLUME] == 3 && s.number[SETTINGS_TALKSPEED] == 4 &&
+              s.number[SETTINGS_TEMPO] == 50, "each its own");
+        CHECK(parse(&s, "speech_volume = 0\nsfx_volume = 255\ntalkspeed = 255\ntempo = 200\n") == 0,
+              "the ends of the ranges");
+        CHECK(parse(&s, "tempo = 49\ntempo = 201\ntalkspeed = 256\nsfx_volume = 256\n") == 4 &&
+              s.number[SETTINGS_TEMPO] == 100 && s.number[SETTINGS_TALKSPEED] == 60, "out of range");
+        /* The master volume is gone, and is named rather than ignored. */
+        CHECK(parse(&s, "volume = 80\n") == 1, "volume is no setting");
+        CHECK(parse(&s, "tempos = 100\ntempo. = 100\nmusic_volume_x = 1\n") == 3, "near names");
+
+        CHECK(parse(&s, "music_volume = 100\nMusic_Volume.KYR1 = 255\ntempo.dott = 150\n"
+                        "talkspeed.dig = 200\nopl.dott = dosbox\n") == 0 && s.games == 3, "three games");
+        CHECK(settings_number_for(&s, "kyr1", SETTINGS_MUSIC_VOLUME) == 255, "kyr1's music");
+        CHECK(settings_number_for(&s, "KYR1", SETTINGS_SFX_VOLUME) == 192, "kyr1's sfx the default");
+        CHECK(settings_number_for(&s, "ft", SETTINGS_MUSIC_VOLUME) == 100, "ft's music the default");
+        CHECK(settings_number_for(&s, "dott", SETTINGS_TEMPO) == 150, "dott's tempo");
+        CHECK(settings_number_for(&s, "dig", SETTINGS_TALKSPEED) == 200, "dig's talkspeed");
+        CHECK(settings_number_for(&s, "dig", SETTINGS_TEMPO) == 100, "dig's tempo the default");
+        CHECK(settings_opl_for(&s, "dott") == SETTINGS_OPL_DOSBOX, "one entry with its opl");
+        CHECK(parse(&s, "sfx_volume.ft = 0\n") == 0 && settings_number_for(&s, "ft", SETTINGS_SFX_VOLUME) == 0,
+              "a game's own 0 is not unset");
+        CHECK(parse(&s, "tempo.dott = 300\n") == 1 && s.games == 0, "bad value, no entry");
+        CHECK(parse(&s, "tempo.a/b = 100\n") == 1, "a path is not a folder");
+        CHECK(strcmp(settings_number_name(SETTINGS_TEMPO), "tempo") == 0, "a name");
+    }
+    expect_error("tempo = 300\n", 0, 1, "a number, 50 to 200", "tempo = 300");
+    expect_error("talkspeed.dig = x\n", 0, 1, "a number, 0 to 255", "talkspeed.dig = x");
+    expect_error("volume = 80\n", 0, 1, "no such setting", "volume = 80");
 
     if (failures) {
         fprintf(stderr, "%d failure(s)\n", failures);
