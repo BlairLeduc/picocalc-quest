@@ -4,8 +4,8 @@
  * spacing, CRLF, a BOM and a last line with no end; a bad line named with
  * its number and text and the rest of the file applied; a bad value
  * leaving the setting as it was; the two buttons on one key; more bad
- * lines than there is room to describe; the volume's gain; and the OPL
- * emulator.
+ * lines than there is room to describe; the volume's gain; the OPL
+ * emulator; and subtitles.
  */
 
 #include <stdio.h>
@@ -171,7 +171,7 @@ int main(void) {
      * later line for the same folder replaces it; bad ones not used. */
     {
         settings_t s;
-        CHECK(parse(&s, "opl.dott = dosbox\n") == 0 && s.opl_games == 1, "opl.dott");
+        CHECK(parse(&s, "opl.dott = dosbox\n") == 0 && s.games == 1, "opl.dott");
         CHECK(settings_opl_for(&s, "dott") == SETTINGS_OPL_DOSBOX, "dott dosbox");
         CHECK(settings_opl_for(&s, "DOTT") == SETTINGS_OPL_DOSBOX, "DOTT dosbox");
         CHECK(settings_opl_for(&s, "atlantis") == SETTINGS_OPL_MAME, "atlantis default");
@@ -179,9 +179,9 @@ int main(void) {
         CHECK(parse(&s, "opl = dosbox\nOPL.Atlantis = MAME\n") == 0, "two lines");
         CHECK(settings_opl_for(&s, "atlantis") == SETTINGS_OPL_MAME, "atlantis mame");
         CHECK(settings_opl_for(&s, "kyr1") == SETTINGS_OPL_DOSBOX, "kyr1 the default");
-        CHECK(parse(&s, "opl.dott = dosbox\nopl.DOTT = mame\n") == 0 && s.opl_games == 1 &&
+        CHECK(parse(&s, "opl.dott = dosbox\nopl.DOTT = mame\n") == 0 && s.games == 1 &&
               settings_opl_for(&s, "dott") == SETTINGS_OPL_MAME, "replaced, one entry");
-        CHECK(parse(&s, "opl.dott = nuked\n") == 1 && s.opl_games == 0, "bad value not used");
+        CHECK(parse(&s, "opl.dott = nuked\n") == 1 && s.games == 0, "bad value not used");
         CHECK(parse(&s, "opl. = dosbox\n") == 1, "no folder");
         CHECK(parse(&s, "opl.a/b = dosbox\n") == 1, "a path is not a folder");
         CHECK(parse(&s, "opl.abcdefghijklmnopqrstuvwx = dosbox\n") == 1, "24 characters");
@@ -193,13 +193,39 @@ int main(void) {
             snprintf(line, sizeof line, "opl.g%02d = dosbox\n", i);
             strcat(text, line);
         }
-        CHECK(parse(&s, text) == 1 && s.opl_games == SETTINGS_OPL_GAMES, "16 games, the 17th not used");
+        CHECK(parse(&s, text) == 1 && s.games == SETTINGS_GAMES, "16 games, the 17th not used");
         CHECK(settings_opl_for(&s, "g15") == SETTINGS_OPL_DOSBOX && settings_opl_for(&s, "g16") == SETTINGS_OPL_MAME,
               "the 17th has the default");
     }
     expect_error("opl.dott = db\n", 0, 1, "dosbox or mame", "opl.dott = db");
     expect("opl = mame\n", 0, DEFAULTS);
     expect_error("opl = db\n", 0, 1, "dosbox or mame", "opl = db");
+
+    /* Subtitles: on by default, as upstream's launchers had them; on or
+     * off in any case; a game's own by folder, the default for the rest,
+     * sharing the game's entry with its OPL emulator. */
+    {
+        settings_t s;
+        CHECK(parse(&s, "") == 0 && s.subtitles, "subtitles default on");
+        CHECK(parse(&s, "subtitles = off\n") == 0 && !s.subtitles, "subtitles off");
+        CHECK(parse(&s, "Subtitles = OFF ; quiet\n") == 0 && !s.subtitles, "subtitles OFF");
+        CHECK(parse(&s, "subtitles = off\nsubtitles = yes\n") == 1 && !s.subtitles,
+              "subtitles bad kept");
+        CHECK(parse(&s, "subtitles.dig = off\n") == 0 && s.games == 1, "subtitles.dig");
+        CHECK(!settings_subtitles_for(&s, "dig") && !settings_subtitles_for(&s, "DIG"), "dig off");
+        CHECK(settings_subtitles_for(&s, "ft"), "ft the default");
+        CHECK(settings_opl_for(&s, "dig") == SETTINGS_OPL_MAME, "dig's opl the default");
+        CHECK(parse(&s, "subtitles = off\nsubtitles.ft = on\n") == 0 &&
+              settings_subtitles_for(&s, "ft") && !settings_subtitles_for(&s, "dott"),
+              "one game on, the rest off");
+        CHECK(parse(&s, "opl.dott = dosbox\nsubtitles.DOTT = off\n") == 0 && s.games == 1 &&
+              settings_opl_for(&s, "dott") == SETTINGS_OPL_DOSBOX &&
+              !settings_subtitles_for(&s, "dott"), "one entry, both settings");
+        CHECK(parse(&s, "subtitles.dig = no\n") == 1 && s.games == 0, "bad value not used");
+        CHECK(parse(&s, "subtitles. = off\n") == 1, "no folder");
+    }
+    expect_error("subtitles.dig = no\n", 0, 1, "on or off", "subtitles.dig = no");
+    expect("subtitles = on\n", 0, DEFAULTS);
 
     /* The volume to upstream's gain, 128 at 100 %. */
     CHECK(settings_gain(0) == 0, "gain(0) = %d", settings_gain(0));

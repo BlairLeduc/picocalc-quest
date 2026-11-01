@@ -22,7 +22,11 @@
  *     gob_mode      = pointer
  *     opl           = mame       the AdLib emulator, mame or dosbox (§8.3)
  *     opl.dott      = dosbox     the same for one game, by its folder in
- *                                /quest; up to SETTINGS_OPL_GAMES of them
+ *                                /quest
+ *     subtitles     = on         the games' text with their speech: on or off
+ *     subtitles.dig = off        the same for one game, by its folder
+ *
+ * Up to SETTINGS_GAMES folders have settings of their own.
  *
  * The user writes it; nothing here writes it (a menu that does is
  * deferred, §19).
@@ -46,14 +50,18 @@
 /* The OPL (AdLib) emulators, by upstream's opl_driver names. */
 enum { SETTINGS_OPL_DOSBOX, SETTINGS_OPL_MAME };
 
-/* Games with their own OPL emulator, and their folder names' length. */
-#define SETTINGS_OPL_GAMES  16
+/* Games with settings of their own, and their folder names' length. */
+#define SETTINGS_GAMES      16
 #define SETTINGS_FOLDER_MAX 24
+
+/* A game's setting that follows the default. */
+#define SETTINGS_UNSET 0xFFu
 
 typedef struct {
     char    folder[SETTINGS_FOLDER_MAX];   /* lower case, NUL-terminated */
-    uint8_t opl;
-} settings_opl_game_t;
+    uint8_t opl;                           /* SETTINGS_OPL_* or SETTINGS_UNSET */
+    uint8_t subtitles;                     /* 0, 1 or SETTINGS_UNSET    */
+} settings_game_t;
 
 /* By the engine numbers of picocalc_input.h, NONE (0) unused. */
 #define SETTINGS_ENGINES 6
@@ -65,8 +73,9 @@ typedef struct {
     uint16_t volume;          /* per cent of the mixer's level         */
     bool     pointer_mode[SETTINGS_ENGINES];   /* the arrows start as the pointer */
     uint8_t  opl;             /* SETTINGS_OPL_*                        */
-    uint8_t  opl_games;       /* entries in use in opl_game            */
-    settings_opl_game_t opl_game[SETTINGS_OPL_GAMES];
+    bool     subtitles;       /* text shown with speech                */
+    uint8_t  games;           /* entries in use in game                */
+    settings_game_t game[SETTINGS_GAMES];
 } settings_t;
 
 /* A line not used: its number from 1, where it is in the text (without
@@ -88,6 +97,10 @@ unsigned settings_parse(settings_t *s, const char *text, size_t len,
 /* The OPL emulator for the game in /quest/<folder>: its own, if it has
  * one, otherwise the default. The folder in any case. */
 unsigned settings_opl_for(const settings_t *s, const char *folder);
+
+/* Whether the game in /quest/<folder> shows its text with its speech:
+ * its own setting, if it has one, otherwise the default. */
+bool settings_subtitles_for(const settings_t *s, const char *folder);
 
 /* Upstream's opl_driver for a SETTINGS_OPL_*: "db" or "mame". */
 const char *settings_opl_driver(unsigned opl);

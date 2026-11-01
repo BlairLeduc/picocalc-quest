@@ -32,6 +32,8 @@ void settings_defaults(settings_t *s) {
     /* MAME's, the owner's choice by ear (M8); DOSBox's, a third to a
      * quarter of the cost, for a game that has no room for it (§8.3). */
     s->opl = SETTINGS_OPL_MAME;
+    /* Upstream's launchers turned them on for every game. */
+    s->subtitles = true;
 }
 
 const char *settings_opl_driver(unsigned opl) {
@@ -93,34 +95,77 @@ static const char *opl(const char *p, size_t n, uint8_t *out) {
     return NULL;
 }
 
-/* opl.<folder>: a game's own OPL emulator, replacing an earlier line for
- * the same folder. */
-static const char *opl_game(settings_t *s, const char *f, size_t fn, const char *v, size_t vn) {
-    if (fn == 0 || fn >= SETTINGS_FOLDER_MAX) return "a folder name of 1 to 23 characters";
+static const char *on_off(const char *p, size_t n, bool *out) {
+    if (same(p, n, "on")) *out = true;
+    else if (same(p, n, "off")) *out = false;
+    else return "on or off";
+    return NULL;
+}
+
+/* The folder's entry, made with every setting the default if it has
+ * none, or NULL with why not. A game's line replaces an earlier one for
+ * the same folder and setting. */
+static settings_game_t *game(settings_t *s, const char *f, size_t fn, const char **why) {
+    *why = "a folder name of 1 to 23 characters";
+    if (fn == 0 || fn >= SETTINGS_FOLDER_MAX) return NULL;
     for (size_t i = 0; i < fn; i++) {
-        if (f[i] <= ' ' || f[i] > '~' || f[i] == '/') return "a folder name of 1 to 23 characters";
+        if (f[i] <= ' ' || f[i] > '~' || f[i] == '/') return NULL;
     }
+    unsigned i = 0;
+    while (i < s->games && !same(f, fn, s->game[i].folder)) i++;
+    if (i == SETTINGS_GAMES) {
+        *why = "more than 16 games";
+        return NULL;
+    }
+    if (i == s->games) {
+        for (size_t j = 0; j < fn; j++) s->game[i].folder[j] = lower(f[j]);
+        s->game[i].folder[fn] = '\0';
+        s->game[i].opl = SETTINGS_UNSET;
+        s->game[i].subtitles = SETTINGS_UNSET;
+        s->games++;
+    }
+    return &s->game[i];
+}
+
+/* opl.<folder>: a game's own OPL emulator. */
+static const char *opl_game(settings_t *s, const char *f, size_t fn, const char *v, size_t vn) {
     uint8_t which;
     const char *why = opl(v, vn, &which);
     if (why != NULL) return why;
-    unsigned i = 0;
-    while (i < s->opl_games && !same(f, fn, s->opl_game[i].folder)) i++;
-    if (i == SETTINGS_OPL_GAMES) return "more than 16 games";
-    if (i == s->opl_games) {
-        for (size_t j = 0; j < fn; j++) s->opl_game[i].folder[j] = lower(f[j]);
-        s->opl_game[i].folder[fn] = '\0';
-        s->opl_games++;
+    settings_game_t *g = game(s, f, fn, &why);
+    if (g == NULL) return why;
+    g->opl = which;
+    return NULL;
+}
+
+/* subtitles.<folder>: whether a game shows its text with its speech. */
+static const char *subtitles_game(settings_t *s, const char *f, size_t fn, const char *v,
+                                  size_t vn) {
+    bool on;
+    const char *why = on_off(v, vn, &on);
+    if (why != NULL) return why;
+    settings_game_t *g = game(s, f, fn, &why);
+    if (g == NULL) return why;
+    g->subtitles = on;
+    return NULL;
+}
+
+static const settings_game_t *find_game(const settings_t *s, const char *folder) {
+    size_t n = strlen(folder);
+    for (unsigned i = 0; i < s->games; i++) {
+        if (same(folder, n, s->game[i].folder)) return &s->game[i];
     }
-    s->opl_game[i].opl = which;
     return NULL;
 }
 
 unsigned settings_opl_for(const settings_t *s, const char *folder) {
-    size_t n = strlen(folder);
-    for (unsigned i = 0; i < s->opl_games; i++) {
-        if (same(folder, n, s->opl_game[i].folder)) return s->opl_game[i].opl;
-    }
-    return s->opl;
+    const settings_game_t *g = find_game(s, folder);
+    return g != NULL && g->opl != SETTINGS_UNSET ? g->opl : s->opl;
+}
+
+bool settings_subtitles_for(const settings_t *s, const char *folder) {
+    const settings_game_t *g = find_game(s, folder);
+    return g != NULL && g->subtitles != SETTINGS_UNSET ? g->subtitles != 0 : s->subtitles;
 }
 
 static const struct {
@@ -154,6 +199,8 @@ static const char *apply(settings_t *s, const char *k, size_t kn, const char *v,
     }
     if (same(k, kn, "opl")) return opl(v, vn, &s->opl);
     if (kn > 4 && same(k, 4, "opl.")) return opl_game(s, k + 4, kn - 4, v, vn);
+    if (same(k, kn, "subtitles")) return on_off(v, vn, &s->subtitles);
+    if (kn > 10 && same(k, 10, "subtitles.")) return subtitles_game(s, k + 10, kn - 10, v, vn);
     for (size_t i = 0; i < sizeof s_modes / sizeof s_modes[0]; i++) {
         if (same(k, kn, s_modes[i].name)) return mode(v, vn, &s->pointer_mode[s_modes[i].engine]);
     }
@@ -290,14 +337,20 @@ void settings_load(void) {
 
     const settings_t *s = &g_settings;
     printf("  settings     : buttons %c left, %c right; pointer %u%%; volume %u%%; "
-           "pointer mode in scumm %d sci %d kyra %d gob %d agi %d; opl %s\n",
+           "pointer mode in scumm %d sci %d kyra %d gob %d agi %d; opl %s; subtitles %s\n",
            s->left_button, s->right_button, s->pointer_speed, s->volume,
            s->pointer_mode[ENGINE_SCUMM], s->pointer_mode[ENGINE_SCI],
            s->pointer_mode[ENGINE_KYRA], s->pointer_mode[ENGINE_GOB],
-           s->pointer_mode[ENGINE_AGI], settings_opl_driver(s->opl));
-    for (unsigned i = 0; i < s->opl_games; i++) {
-        printf("  settings     : opl %s in /quest/%s\n", settings_opl_driver(s->opl_game[i].opl),
-               s->opl_game[i].folder);
+           s->pointer_mode[ENGINE_AGI], settings_opl_driver(s->opl), s->subtitles ? "on" : "off");
+    for (unsigned i = 0; i < s->games; i++) {
+        const settings_game_t *g = &s->game[i];
+        if (g->opl != SETTINGS_UNSET) {
+            printf("  settings     : opl %s in /quest/%s\n", settings_opl_driver(g->opl), g->folder);
+        }
+        if (g->subtitles != SETTINGS_UNSET) {
+            printf("  settings     : subtitles %s in /quest/%s\n", g->subtitles ? "on" : "off",
+                   g->folder);
+        }
     }
 }
 
