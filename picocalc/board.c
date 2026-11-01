@@ -55,7 +55,8 @@ static void __no_inline_not_in_flash_func(flash_timing_scale)(unsigned mul) {
  * §16 M8): at 300 MHz, for each divider in SWEEP_DIVS and each RX delay,
  * the whole image read SWEEP_PASSES times through the uncached,
  * unallocating XIP window and checksummed against the sum read at the
- * timing in use. All of it from SRAM with interrupts off and core 1 not
+ * slowest divider in the table: read at the timing under test, a timing
+ * that corrupts the same way every time would pass its own check. All of it from SRAM with interrupts off and core 1 not
  * yet started, so nothing else fetches from flash while the timing is
  * wrong; reads cannot change the flash. The banner prints the table. */
 #define SWEEP_PASSES 2u
@@ -81,11 +82,16 @@ static void __no_inline_not_in_flash_func(flash_sweep)(void) {
 
     uint32_t irq = save_and_disable_interrupts();
     uint32_t safe = qmi_hw->m[0].timing;
+    uint32_t keep = safe & ~(QMI_M0_TIMING_CLKDIV_BITS | QMI_M0_TIMING_RXDELAY_BITS);
+    qmi_hw->m[0].timing = keep | (uint32_t)s_sweep_divs[SWEEP_DIVS - 1u] << QMI_M0_TIMING_CLKDIV_LSB |
+                          2u << QMI_M0_TIMING_RXDELAY_LSB;
+    __dsb();
     uint32_t want = flash_sum(p, words);
+    qmi_hw->m[0].timing = safe;
+    __dsb();
     for (unsigned d = 0; d < SWEEP_DIVS; d++) {
         for (unsigned rx = 0; rx < 8u; rx++) {
-            uint32_t t = safe & ~(QMI_M0_TIMING_CLKDIV_BITS | QMI_M0_TIMING_RXDELAY_BITS);
-            qmi_hw->m[0].timing = t | (uint32_t)s_sweep_divs[d] << QMI_M0_TIMING_CLKDIV_LSB |
+            qmi_hw->m[0].timing = keep | (uint32_t)s_sweep_divs[d] << QMI_M0_TIMING_CLKDIV_LSB |
                                   rx << QMI_M0_TIMING_RXDELAY_LSB;
             __dsb();
             uint32_t t0 = timer_hw->timerawl;

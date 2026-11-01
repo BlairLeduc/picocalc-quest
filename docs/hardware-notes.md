@@ -572,16 +572,19 @@ Plus 2 W (RP2350B rev 2, 16 MB flash) in a PicoCalc, 2026-10-30, core
 rail 1.20 V, room temperature: a 3.76 MB image read twice per setting
 through the uncached, unallocating XIP window (`0x14000000`), from SRAM
 with interrupts off, each read's checksum compared against one taken at
-the bootrom's doubled timing. The RX delays (in half `clk_sys` cycles)
-that read the image intact:
+the timing in use, divider 4 and RX delay 4. That reference could pass a
+timing that corrupts the same way every time, so a second run on
+2026-10-31 took it at 50 MHz (divider 6, RX delay 2) instead. The RX
+delays (in half `clk_sys` cycles) that read the image intact, first run
+and second:
 
-| Divider | Flash clock | RX delays intact | One read of the image |
-|---:|---:|---|---:|
-| 6 | 50 MHz | 0–7 | 170–179 ms |
-| 5 | 60 MHz | 0–7 | 145–157 ms |
-| 4 | 75 MHz | 1–7 (0 failed on one boot of two) | 123–132 ms |
-| 3 | 100 MHz | 2–6 | 97–110 ms |
-| 2 | 150 MHz | 3–5 | 75–85 ms |
+| Divider | Flash clock | RX delays intact, first run | Second run, 50 MHz reference | One read of the image |
+|---:|---:|---|---|---:|
+| 6 | 50 MHz | 0–7 | 0–7 | 170–180 ms |
+| 5 | 60 MHz | 0–7 | 0–7 | 145–157 ms |
+| 4 | 75 MHz | 1–7 (0 failed on one boot of two) | 0–7 | 123–132 ms |
+| 3 | 100 MHz | 2–6 | 1–6 | 97–110 ms |
+| 2 | 150 MHz | 3–5 | 2–5 | 75–85 ms |
 
 The window narrows and moves later as the clock rises, and a setting at
 its edge passes on one boot and fails on the next, so take the middle of
