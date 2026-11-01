@@ -1394,7 +1394,7 @@ Atlantis 75 → 50 %, King's Quest I 51 → 11 %); SRAM tiers 1–4 (RAM
 (the owner's ear), with `opl.<folder> = dosbox` per game, Day of the
 Tentacle 82.8 % on it. Dropped: SCI in mono (Space Quest IV 53.8 →
 39.5 %), for the stereo. Fixed: Full Throttle's audio hold-off (§8.2).
-Left: its porch scene and white movie patches (§19). The soak passed with
+Left: its porch scene, fixed since (§19), and white movie patches (§19). The soak passed with
 Fate of Atlantis: 30 minutes on battery, none of 1,811 heartbeats
 missing, 0 late refills, I²C errors and dropped lines. Four runs with
 Space Quest IV stopped on a script bug of the game's at its start (§19).
@@ -1483,16 +1483,24 @@ Every value the port depends on that has not been checked on this hardware
   their music as CD tracks; upstream's CD manager is an empty stub and
   builds no compressed-audio decoder, so they play effects and no music.
   The owner deferred it; it would take a track-file player and a decoder.
-- **Two Full Throttle picture faults** (found in M5 and M8); the iMUSE
-  hold-off found with them is fixed (§8.2). In the porch scene with
-  Ripburger the backdrop is sheared and the walkers leave trails: SMUSH
-  sets the screen's pitch to its width for a movie and back at the end,
-  leaving the last frame at the movie's pitch, and the room is not
-  redrawn over it. Re-laying that frame at the screen's pitch cured the
-  shear but not the trails, and was taken out. Some movies also show
-  patches of white in their backgrounds, in the frames as decoded (every
-  row filled and sent). Both play correctly on the iPad's ScummVM. The
-  owner stopped the chase there (2026-10-31): the game plays through.
+- **Full Throttle's white movie patches** (found in M8): some movies
+  showed patches of white in their backgrounds, in the frames as decoded
+  (every row filled and sent); they play correctly on the iPad's
+  ScummVM. The owner did not see them in the test of 2026-11-01, which
+  does not show they are gone. Cause unknown.
+- **Fixed since M8: the sheared backdrop and trails after a movie**
+  (2026-11-01), in Full Throttle's porch scene and worse in The Dig.
+  SMUSH sets the screen's pitch to its width for a movie and back at the
+  end, through `resetWithoutOwnership(..., vs.getFormat())`. `reset()`
+  clears the surface's format before reading that reference, so the
+  screen's `bytesPerPixel` became 0 and every strip copy from back to
+  front copied nothing, until a room change or a restore rebuilt the
+  screen. A movie that returned to its own room left its last frame on
+  show, at the wrong pitch, with actors drawn over it. The patched
+  `smush_player.cpp` passes a copy of the format, and the surface's own
+  base: `getPixels(0, 0)` adds `xstart`, which the zero format had
+  half hidden. Every movie in the test was at `xstart` 0, so the base
+  half has not run in a scrolled room.
 - **Space Quest IV's script error at its start** (found in M8): in room
   25, script 701, `turnCycle` does arithmetic on an object, or the
   interpreter's program counter goes astray, and the game stops; the
