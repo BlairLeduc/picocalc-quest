@@ -311,6 +311,20 @@ The driver reaches the chip over a **PIO SPI whose divider is fixed against
   sleep; `caffeinate -d` (or `-dims`) keeps the display up. Found by the
   owner of the PicoCalc emulators, 2026-10-04, after two unexplained
   drop-outs: both cores were still running their normal loops each time.
+- **UF2 Loader's app partition is the flash less 8 KB, as the loader was
+  built.** UF2 Loader (pelrun, 2.5) puts one partition table in the first
+  8 KB of an RP2350's flash, with one partition, "App", from 8 KB to the
+  end of the flash size the loader was compiled for
+  (`PICO_FLASH_SIZE_BYTES / 1024 - 8` KB, `stage3/partitions.json.in`).
+  The released `bootloader_pico2.uf2` is built for the Pico 2's 4 MB, so
+  on a Plus 2 or Plus 2 W, with 16 MB fitted, an application has
+  **4,088 KB**, not 16 MB, unless the loader is rebuilt for 16 MB. The
+  loader remaps XIP so the partition appears at `0x10000000`; an image
+  built for that address runs unchanged. The bootrom's
+  `get_partition_table_info` reads the partition from the table it keeps
+  in RAM, without touching flash, so a program can report it while
+  another core runs from flash. **Read from source**, 2026-10-31; not yet
+  read on a board.
 - **Configure stdio explicitly.** Select UART, USB CDC or a custom LCD
   `stdio_driver_t` in the application. Keep CMake's UART definitions consistent
   with the pin header. Multiple enabled stdio drivers can receive output;

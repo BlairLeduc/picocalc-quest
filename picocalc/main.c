@@ -14,8 +14,10 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#include "boot/picobin.h"
 #include "hardware/sync.h"
 #include "hardware/watchdog.h"
+#include "pico/bootrom.h"
 #include "pico/multicore.h"
 #include "pico/stdlib.h"
 
@@ -23,6 +25,7 @@
 #include "board_config.h"
 #include "clock.h"
 #include "core1.h"
+#include "counters.h"
 #include "frank_quest_fs.h"
 #include "log.h"
 #include "page.h"
@@ -274,6 +277,36 @@ static void log_psram(bool ok, const psram_check_t *r) {
     }
 }
 
+/* UF2 Loader's app partition, which the image must fit (§12.3, §17),
+ * from the bootrom's resident copy of the partition table, into the
+ * counter block and the banner. Nothing is read from flash, which core 1
+ * runs from. An image flashed over SWD has written over the loader and
+ * its table, and finds none. */
+static void note_partition(void) {
+    extern char __flash_binary_end;
+    uint32_t image = (uint32_t)(uintptr_t)&__flash_binary_end - XIP_BASE;
+    uint32_t info[2], size = 0;
+    int n = rom_get_partition_table_info(info, 2,
+        PT_INFO_PARTITION_LOCATION_AND_FLAGS | PT_INFO_SINGLE_PARTITION | (0u << 24));
+    if (n == 2 && (info[0] & PT_INFO_PARTITION_LOCATION_AND_FLAGS)) {
+        uint32_t first = (info[1] & PICOBIN_PARTITION_LOCATION_FIRST_SECTOR_BITS)
+                         >> PICOBIN_PARTITION_LOCATION_FIRST_SECTOR_LSB;
+        uint32_t last = (info[1] & PICOBIN_PARTITION_LOCATION_LAST_SECTOR_BITS)
+                        >> PICOBIN_PARTITION_LOCATION_LAST_SECTOR_LSB;
+        size = (last + 1u - first) * 4096u;
+    }
+    picocalc_quest_counters.image_kb = image / 1024u;
+    picocalc_quest_counters.partition_kb = size / 1024u;
+    if (size == 0) {
+        printf("  flash        : image %lu KB; no partition table (%d)\n",
+               (unsigned long)(image / 1024u), n);
+    } else {
+        printf("  flash        : image %lu KB; app partition %lu KB, %lu KB spare\n",
+               (unsigned long)(image / 1024u), (unsigned long)(size / 1024u),
+               (unsigned long)(size > image ? (size - image) / 1024u : 0u));
+    }
+}
+
 int main(void) {
     shell_reading_t before = read_shell_clock();
     bool clocks_ok = board_init_clocks();
@@ -310,6 +343,8 @@ int main(void) {
     printf("  loader       : %s\n", picocalc_shell_loader_present()
            ? "started by UF2 Loader; Esc in the selector goes to the shell"
            : "installed from BOOTSEL; Esc in the selector powers off");
+    picocalc_quest_counters.loader = picocalc_shell_loader_present();
+    note_partition();
 #if PICOCALC_QUEST_TEST_PATTERN
     printf("  lcd          : spi %lu Hz, init %lu us, test pattern %lu us\n",
            (unsigned long)g_core1.spi_hz, (unsigned long)g_core1.lcd_us,

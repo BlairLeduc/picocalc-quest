@@ -164,7 +164,7 @@ compiled: the five engines and the parts of `common/`, `audio/`,
   `OSystem`, clears the singletons and wipes the mspace in one step.
 - **Clock:** 504 MHz at 1.65 V by default (`vreg_disable_voltage_limit`),
   PSRAM capped at 133 MHz (100 MHz in release builds), flash at 66 MHz.
-- **Image size:** the 1.00 release UF2 is 7,322,112 bytes, so about 3.6 MB
+- **Image size:** the 1.00 release UF2 is 7,322,124 bytes, so about 3.6 MB
   of flash image.
 - **No clock:** `OSystem_RP2350::getTimeAndDate()` makes up 1 January 2025
   plus the time since boot, and the SD driver's `get_fattime()` returns 0,
@@ -933,8 +933,10 @@ tiers.
 
 ### 12.3 Flash
 
-~3.6 MB of 16 MB. Ample for the image; nothing else is stored in flash.
-UF2 Loader's application partition must also hold it (§17).
+About 3.6 MB of 16 MB (3,674 KB in M9's release build); nothing else is
+stored in flash. UF2 Loader's application partition must also hold it,
+and is smaller than the flash: the stock loader, built for a 4 MB Pico 2,
+gives 4,088 KB, which leaves about 410 KB (§17; HW §2.7).
 
 ---
 
@@ -1108,6 +1110,15 @@ PicoCalc, so development follows EL §13.1 and HW §2.7:
   boot.
 - **Release**: no UART, no stdio; GP2/GP3 free. A counter block at a fixed
   symbol with a magic word, read over SWD without halting (HW §2.7).
+  `picocalc/counters.h` holds it: `picocalc_quest_counters`, 124 bytes,
+  with the magic, a layout number, the heartbeat's totals and last-second
+  shares, and the `git describe` version. Core 1 fills it at each
+  heartbeat in both builds; core 0 adds at boot whether UF2 Loader
+  started the image, the image's size, and UF2 Loader's app partition's,
+  from the bootrom's resident table (§12.3), which the development banner
+  also prints. `scripts/counters.sh` finds the block with `nm` and reads
+  it with OpenOCD's `init` alone; `--watch` reads it every minute through
+  a soak and checks the run (M9).
 
 ### 14.3 Heartbeat
 
@@ -1429,7 +1440,7 @@ Every value the port depends on that has not been checked on this hardware
 | Ctrl+Alt+Del delivered by the MCU | yes | used on the keyboard by the owner, M3 | high | Confirmed 2026-10-29 |
 | Mixer half fits 14 ms with OPL at 300 MHz | yes, with DOSBox's OPL | longest half 7.8 ms over every engine (M5); MAME's 10.8 ms in one intro | high | Confirmed 2026-10-29 |
 | PSRAM frame read cost | hidden behind the wire; 6 % of core 0 by DMA | measured, M2 (§7.3) | high | Confirmed 2026-10-29; M8 measures under engines |
-| UF2 Loader's app partition holds 3.6 MB | yes | not checked | low | M9 |
+| UF2 Loader's app partition holds the image (3,674 KB) | yes; 4,088 KB, the stock loader's (flash 4 MB less 8 KB) | read from UF2 Loader's source; the banner reports it (M9) | medium | M9 |
 | POWMAN timer unaffected by the move to 300 MHz | yes | read either side of the switch, M1 | high | Confirmed 2026-10-29 |
 | Shell's clock record survives into the port and reads correctly | yes | read at boot, M1, after a reset over SWD; a launch from the shell gave a save the shell's local time, M7 | high | Confirmed 2026-10-30 |
 | Upstream's SRAM use leaves room for the port | yes; 342,920 bytes left | measured, M0 build | high | Confirmed 2026-10-29 |

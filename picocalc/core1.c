@@ -11,6 +11,7 @@
 #include "pico/stdlib.h"
 
 #include "board.h"
+#include "counters.h"
 #include "framepool.h"
 #include "kbd.h"
 #include "lcd.h"
@@ -22,6 +23,8 @@
 #include "status.h"
 #include "video.h"
 
+#include "picocalc_quest_version.h"
+
 /* The battery is refreshed by the MCU every 20 s (hardware-notes.md §6);
  * once a second is plenty. The keyboard's poll, every KBD_POLL_US, is
  * what keeps the MCU's bus watchdog fed (§6.1). */
@@ -29,6 +32,14 @@
 #define HEARTBEAT_US  1000000u
 
 core1_bringup_t g_core1 = { .sb_version = -1 };
+
+/* At a fixed symbol, for SWD (counters.h); `used`, since nothing in the
+ * image reads it. The magic is set once core 1 runs. */
+__attribute__((used)) volatile counters_t picocalc_quest_counters = {
+    .layout = COUNTERS_LAYOUT,
+    .battery = -1,
+    .version = PICOCALC_QUEST_VERSION,
+};
 
 #define RGB565(r, g, b) ((uint16_t)((((r) >> 3) << 11) | (((g) >> 2) << 5) | ((b) >> 3)))
 
@@ -232,6 +243,7 @@ void core1_main(void) {
     s_row_dma = dma_claim_unused_channel(true);
 #endif
 
+    picocalc_quest_counters.magic = COUNTERS_MAGIC;
     __dmb();
     g_core1.ready = true;
 
@@ -330,6 +342,25 @@ void core1_main(void) {
             uint32_t upd = (update - last_update) / (HEARTBEAT_US / 1000u);
             /* And in the audio IRQ, which the busy share includes (§8.3). */
             uint32_t mixed = (mix - last_mix) / (HEARTBEAT_US / 1000u);
+            volatile counters_t *c = &picocalc_quest_counters;
+            c->seconds = seconds;
+            c->busy = busy;
+            if (busy > c->busy_max) c->busy_max = busy;
+            c->audio = mixed;
+            c->frames = pub;
+            c->presents = s_present.presents;
+            c->dropped = drop;
+            c->late = g_sound.late;
+            if (mix_max > c->mix_max_us) c->mix_max_us = mix_max;
+            c->keys = taken;
+            c->ring_full = kbd_overflows();
+            c->unknown = g_input_unknown;
+            c->stray = g_input_stray;
+            c->i2c_errors = sb_error_count();
+            c->log_dropped = log_dropped();
+            c->core1_stack = stack_used();
+            c->temp_c = temp_c;
+            c->battery = battery;
             printf("hb %lu: core 0 busy %lu.%lu%%, update %lu.%lu%% in %lu calls, "
                    "audio %lu.%lu%% in %lu halves (max %lu us), late %lu, frames %lu, presented %lu, dropped %lu, "
                    "rows filled %lu sent %lu, present %lu us (max %lu), publish max %lu us, core 1 stack %lu B; "
