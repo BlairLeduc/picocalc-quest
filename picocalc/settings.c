@@ -13,7 +13,7 @@
 #endif
 
 /* The engine numbers of picocalc_input.h, which is not pure. */
-enum { ENGINE_SCUMM = 1, ENGINE_SCI, ENGINE_KYRA, ENGINE_GOB, ENGINE_AGI };
+enum { ENGINE_SCUMM = 1, ENGINE_SCI, ENGINE_KYRA, ENGINE_GOB, ENGINE_AGI, ENGINE_SKY };
 
 /* ScummVM's names, ranges and defaults; the defaults are what upstream's
  * launchers set for every game. */
@@ -42,6 +42,7 @@ void settings_defaults(settings_t *s) {
     s->pointer_mode[ENGINE_KYRA] = true;
     s->pointer_mode[ENGINE_GOB] = true;
     s->pointer_mode[ENGINE_AGI] = false;
+    s->pointer_mode[ENGINE_SKY] = true;
     /* MAME's, the owner's choice by ear (M8); DOSBox's, a third to a
      * quarter of the cost, for a game that has no room for it (§8.3). */
     s->opl = SETTINGS_OPL_MAME;
@@ -218,7 +219,7 @@ static const struct {
     int         engine;
 } s_modes[] = {
     { "agi_mode", ENGINE_AGI },   { "sci_mode", ENGINE_SCI }, { "scumm_mode", ENGINE_SCUMM },
-    { "kyra_mode", ENGINE_KYRA }, { "gob_mode", ENGINE_GOB },
+    { "kyra_mode", ENGINE_KYRA }, { "gob_mode", ENGINE_GOB },   { "sky_mode", ENGINE_SKY },
 };
 
 /* One key and value onto s: NULL if used, otherwise why not. `which` is
@@ -383,14 +384,15 @@ void settings_load(void) {
     const settings_t *s = &g_settings;
     printf("  settings     : buttons %c left, %c right; pointer %u%%; "
            "volume music %u sfx %u speech %u; talkspeed %u, tempo %u; "
-           "pointer mode in scumm %d sci %d kyra %d gob %d agi %d; opl %s; subtitles %s\n",
+           "pointer mode in scumm %d sci %d kyra %d gob %d agi %d sky %d; opl %s; subtitles %s\n",
            s->left_button, s->right_button, s->pointer_speed,
            s->number[SETTINGS_MUSIC_VOLUME], s->number[SETTINGS_SFX_VOLUME],
            s->number[SETTINGS_SPEECH_VOLUME], s->number[SETTINGS_TALKSPEED],
            s->number[SETTINGS_TEMPO],
            s->pointer_mode[ENGINE_SCUMM], s->pointer_mode[ENGINE_SCI],
            s->pointer_mode[ENGINE_KYRA], s->pointer_mode[ENGINE_GOB],
-           s->pointer_mode[ENGINE_AGI], settings_opl_driver(s->opl), s->subtitles ? "on" : "off");
+           s->pointer_mode[ENGINE_AGI], s->pointer_mode[ENGINE_SKY],
+           settings_opl_driver(s->opl), s->subtitles ? "on" : "off");
     for (unsigned i = 0; i < s->games; i++) {
         const settings_game_t *g = &s->game[i];
         if (g->opl != SETTINGS_UNSET) {

@@ -205,6 +205,7 @@ else()
         ENABLE_GOB=1
         ENABLE_SCI=1
         ENABLE_KYRA=1
+        ENABLE_SKY=1
         ENABLE_SCUMM=1
         ENABLE_SCUMM_7_8=1
 

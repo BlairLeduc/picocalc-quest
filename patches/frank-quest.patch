@@ -989,6 +989,35 @@
  	_vm->_gdi->_numStrips = _origNumStrips;
  
  	delete _codec37;
+--- a/src/engines/sky/debug.cpp
++++ b/src/engines/sky/debug.cpp
+@@ -1099,12 +1099,11 @@
+ 
+ Debugger::~Debugger() {} // we need this here for __SYMBIAN32__
+ 
++// PicoCalc: DISABLE_GUI's stub GUI::Debugger has neither to call.
+ void Debugger::preEnter() {
+-	::GUI::Debugger::preEnter();
+ }
+ 
+ void Debugger::postEnter() {
+-	::GUI::Debugger::postEnter();
+ 	_mouse->resetCursor();
+ }
+ 
+--- a/src/engines/sky/music/musicbase.cpp
++++ b/src/engines/sky/music/musicbase.cpp
+@@ -120,7 +120,9 @@
+ 		song = 4;
+ 	}
+ 	Common::String trackName = Common::String::format("music_%d%02d", section, song);
+-	Audio::SeekableAudioStream *stream = Audio::SeekableAudioStream::openStreamFile(trackName);
++	// PicoCalc: no enhanced music tracks. openStreamFile() needs the audio
++	// decoders CABAL_MINIMAL_AUDIO leaves out, so it is not linked.
++	Audio::SeekableAudioStream *stream = nullptr;
+ 	if (stream) {
+ 		// not all tracks should loop
+ 		bool loops = true;
 --- a/src/frank_quest_main.cpp
 +++ b/src/frank_quest_main.cpp
 @@ -15,9 +15,11 @@
@@ -1013,10 +1042,22 @@
  #include "common/archive.h"
  
  // GOB Engine includes
-@@ -235,6 +240,29 @@
-     return 0;  // Unknown
- }
+@@ -38,6 +43,9 @@
+ #include "kyra/kyra_lok.h"
+ #include "kyra/kyra_hof.h"
  
++// Beneath a Steel Sky Engine include
++#include "sky/sky.h"
++
+ // SCI Engine includes
+ #include "sci/sci.h"
+ 
+@@ -233,8 +241,31 @@
+ 
+     printf("GOB Detection: No known files found\n");
+     return 0;  // Unknown
++}
++
 +// PicoCalc: a config domain per game folder, quest-<folder>. Engines name
 +// their save files after the domain, and upstream's one domain per engine
 +// gave every SCUMM game the same quest-scumm.s01, so one game's save
@@ -1030,8 +1071,8 @@
 +        if (!Common::isAlnum(domain[i]) && domain[i] != '-' && domain[i] != '_')
 +            domain.setChar('_', i);
 +    ConfMan.setActiveDomain(domain);
-+}
-+
+ }
+ 
 +// PicoCalc: whether the game being launched shows its text with its
 +// speech, from picocalc.ini (picocalc-quest design.md §10.3); set by
 +// dispatchGame() before the launcher runs.
@@ -1043,7 +1084,7 @@
  // Forward declaration
  static bool launchGOBGameWithVersion(const char *gamePath, int gobVersion);
  
-@@ -257,17 +285,132 @@
+@@ -257,17 +288,132 @@
  
  // GOB (Gobliins) game launcher with explicit version
  // Returns true if a game was found and launched
@@ -1180,7 +1221,7 @@
      ConfMan.setBool("mute", false);
      ConfMan.setBool("speech_mute", false);
      ConfMan.setBool("sfx_mute", false);
-@@ -283,13 +426,14 @@
+@@ -283,13 +429,14 @@
      ConfMan.setBool("enable_gs", false);
      ConfMan.setBool("multi_midi", false);
      ConfMan.setInt("midi_gain", 100);
@@ -1197,7 +1238,7 @@
  
      // Graphics settings
      ConfMan.set("gfx_mode", "normal");
-@@ -326,7 +470,13 @@
+@@ -326,7 +473,13 @@
      memset(&gameDesc, 0, sizeof(gameDesc));
  
      // Set up the ADGameDescription part based on detected version
@@ -1212,7 +1253,7 @@
          gameDesc.desc.gameid = "gob3";
          gameDesc.desc.extra = "VGA";
          gameDesc.gameType = Gob::kGameTypeGob3;
-@@ -346,13 +496,15 @@
+@@ -346,13 +499,15 @@
          printf("GOB: Configuring for Gobliiins 1 (EGA)\n");
      }
  
@@ -1235,7 +1276,7 @@
  
      printf("GOB: Creating engine instance...\n");
  
-@@ -378,14 +530,19 @@
+@@ -378,14 +533,19 @@
  static bool launchAGIGame(const char *gamePath) {
      printf("AGI: Attempting to launch game from %s\n", gamePath);
  
@@ -1259,7 +1300,7 @@
      ConfMan.setBool("mute", false);
      ConfMan.setBool("speech_mute", false);
      ConfMan.setInt("autosave_period", 0);  // Disable autosave on embedded
-@@ -399,7 +556,7 @@
+@@ -399,7 +559,7 @@
      ConfMan.setBool("enable_gs", false);
      ConfMan.setBool("multi_midi", false);
      ConfMan.setInt("midi_gain", 100);
@@ -1268,7 +1309,7 @@
      ConfMan.setInt("talkspeed", 60);
  
      // Load all plugins (engine and music) before creating the engine
-@@ -578,13 +735,14 @@
+@@ -578,13 +738,14 @@
             gameId == 1 ? "Kyrandia 2 (Hand of Fate)" : "Kyrandia 1 (Legend of Kyrandia)",
             gamePath);
  
@@ -1287,7 +1328,7 @@
      ConfMan.setBool("mute", false);
      ConfMan.setBool("speech_mute", false);
      ConfMan.setBool("sfx_mute", false);
-@@ -595,7 +753,7 @@
+@@ -595,7 +756,7 @@
      ConfMan.set("gm_device", "null");
      ConfMan.set("mt32_device", "null");
      ConfMan.setBool("native_mt32", false);
@@ -1296,7 +1337,7 @@
      ConfMan.setInt("talkspeed", 60);
      ConfMan.set("language", "en");
      ConfMan.set("gfx_mode", "normal");
-@@ -614,20 +772,30 @@
+@@ -614,20 +775,30 @@
      static KYRAGameDescription gameDesc;
      memset(&gameDesc, 0, sizeof(gameDesc));
  
@@ -1340,7 +1381,66 @@
  
      printf("KYRA: Creating engine...\n");
      ::Engine *engine = (gameId == 1)
-@@ -708,12 +876,13 @@
+@@ -642,6 +813,58 @@
+     return (err.getCode() == Common::kNoError);
+ }
+ 
++// Beneath a Steel Sky launcher. sky.dsk, sky.dnr and sky.cpt in gamePath;
++// the engine finds its own version from them.
++static bool launchSkyGame(const char *gamePath) {
++    printf("SKY: Launching Beneath a Steel Sky from %s\n", gamePath);
++
++    // PicoCalc: the game's own domain, before the path that goes in it.
++    setGameDomain(gamePath);
++    ConfMan.set("path", gamePath);
++
++    // Audio/config defaults
++    ConfMan.setInt("music_volume", s_number[SETTINGS_MUSIC_VOLUME]);
++    ConfMan.setInt("sfx_volume", s_number[SETTINGS_SFX_VOLUME]);
++    ConfMan.setInt("speech_volume", s_number[SETTINGS_SPEECH_VOLUME]);
++    ConfMan.setBool("mute", false);
++    ConfMan.setBool("speech_mute", false);
++    ConfMan.setBool("sfx_mute", false);
++    ConfMan.setBool("music_mute", false);
++    ConfMan.setInt("autosave_period", 0);
++    ConfMan.setBool("enable_unsupported_game_warning", false);
++    ConfMan.set("music_driver", "adlib");
++    ConfMan.set("gm_device", "null");
++    ConfMan.set("mt32_device", "null");
++    ConfMan.setBool("native_mt32", false);
++    ConfMan.setBool("subtitles", s_subtitles);
++    ConfMan.set("language", "en");
++    ConfMan.set("gfx_mode", "normal");
++    ConfMan.setBool("aspect_ratio", false);
++    // The engine reads this; the command line code that registers it is
++    // not built.
++    ConfMan.setBool("alt_intro", false);
++
++    printf("SKY: Loading plugins...\n");
++    PluginManager::instance().loadAllPlugins();
++
++    // Add game directory to search path
++    Common::FSNode gameDir(gamePath);
++    if (gameDir.exists() && gameDir.isDirectory()) {
++        SearchMan.addDirectory(gamePath, gameDir, 0, 4);
++        printf("SKY: Added %s to search path\n", gamePath);
++    }
++
++    printf("SKY: Creating engine...\n");
++    ::Engine *engine = new Sky::SkyEngine(g_system);
++
++    printf("SKY: Running game...\n");
++    Common::Error err = engine->run();
++
++    printf("SKY: Game finished with code %d\n", err.getCode());
++    delete engine;
++    return (err.getCode() == Common::kNoError);
++}
++
+ // Full Throttle (SCUMM v7) launcher temporarily disabled.
+ 
+ // Map a common SCI game id string (from the directory name or manual hint)
+@@ -708,12 +931,13 @@
      printf("SCI: Launching game from %s (id=%s)\n", gamePath,
             gameIdStr ? gameIdStr : "(auto)");
  
@@ -1358,7 +1458,7 @@
      ConfMan.setBool("mute", false);
      ConfMan.setBool("speech_mute", false);
      ConfMan.setBool("sfx_mute", false);
-@@ -727,7 +896,7 @@
+@@ -727,7 +951,7 @@
      ConfMan.setBool("enable_gs", false);
      ConfMan.setBool("multi_midi", false);
      ConfMan.setInt("midi_gain", 100);
@@ -1367,7 +1467,7 @@
      ConfMan.setInt("talkspeed", 60);
      ConfMan.set("language", "en");
      ConfMan.set("gfx_mode", "normal");
-@@ -736,7 +905,11 @@
+@@ -736,7 +960,11 @@
      // SCI-specific prefs
      ConfMan.setBool("copy_protection", false);
      ConfMan.setBool("prefer_digitalsfx", false);
@@ -1380,7 +1480,7 @@
      ConfMan.setBool("enable_black_lined_video", false);
      ConfMan.setBool("windows_cursors", false);
      ConfMan.setBool("silver_cursors", false);
-@@ -763,12 +936,16 @@
+@@ -763,12 +991,16 @@
  
      static ADGameDescription gameDesc;
      memset(&gameDesc, 0, sizeof(gameDesc));
@@ -1403,7 +1503,7 @@
  
      ConfMan.set("gameid", gameDesc.gameid);
  
-@@ -825,6 +1002,7 @@
+@@ -825,6 +1057,7 @@
  // Full Throttle is digital-only (iMUSE Digital); it doesn't use the classic
  // MIDI synth chain and the detection table marks it MDT_NONE.
  #define CABAL_MIDI_FT       (0)
@@ -1411,7 +1511,7 @@
  
  static const ScummGameInfo kScummGames[] = {
      // --- SCUMM v4 (floppy, .LFL + DISK*.LEC) ---
-@@ -846,6 +1024,7 @@
+@@ -846,6 +1079,7 @@
      // --- SCUMM v7 (ft.la%d / dig.la%d) — digital audio + SMUSH video ---
      {"ft",       "ft",      "ft.la%d",       Scumm::kGenDiskNum, Scumm::GID_FT,         7, "",    CABAL_MIDI_FT,      0},
      {"fulltp",   "ft",      "ft.la%d",       Scumm::kGenDiskNum, Scumm::GID_FT,         7, "",    CABAL_MIDI_FT,      0},
@@ -1419,7 +1519,7 @@
  };
  
  static const ScummGameInfo *findScummGame(const char *gamePath) {
-@@ -867,12 +1046,13 @@
+@@ -867,12 +1101,13 @@
      printf("SCUMM: Launching %s (v%d, id=%s) from %s\n",
             info->gameid, info->version, info->gameid, gamePath);
  
@@ -1437,7 +1537,7 @@
      ConfMan.setBool("mute", false);
      ConfMan.setBool("speech_mute", false);
      ConfMan.setBool("sfx_mute", false);
-@@ -886,8 +1066,8 @@
+@@ -886,8 +1121,8 @@
      ConfMan.setBool("enable_gs", false);
      ConfMan.setBool("multi_midi", false);
      ConfMan.setInt("midi_gain", 100);
@@ -1448,7 +1548,7 @@
      ConfMan.set("language", "en");
      ConfMan.set("gfx_mode", "normal");
      ConfMan.setBool("aspect_ratio", false);
-@@ -906,7 +1086,7 @@
+@@ -906,7 +1141,7 @@
      ConfMan.setInt("boot_param", 0);
      ConfMan.setInt("save_slot", -1);
      ConfMan.setInt("dimuse_tempo", 10);
@@ -1457,7 +1557,7 @@
      ConfMan.set("render_mode", "");
      ConfMan.set("easter_egg", "");
  
-@@ -1028,12 +1208,23 @@
+@@ -1028,12 +1263,23 @@
      ConfMan.registerDefault("language",                        "en");
      ConfMan.registerDefault("gfx_mode",                        "normal");
      ConfMan.registerDefault("render_mode",                     "");
@@ -1481,7 +1581,16 @@
      switch (g.engine) {
      case QuestEngine::Scumm:
          return launchScummGame(g.dirPath);
-@@ -1164,11 +1355,16 @@
+@@ -1048,6 +1294,8 @@
+         return launchGOBGameWithVersion(g.dirPath, (int)g.engineSubtype);
+     case QuestEngine::Agi:
+         return launchAGIGame(g.dirPath);
++    case QuestEngine::Sky:
++        return launchSkyGame(g.dirPath);
+     }
+     return false;
+ }
+@@ -1164,11 +1412,16 @@
          // selector frame and the device looks frozen.
          frank_quest_show_loading(g);
  
@@ -1529,7 +1638,19 @@
  	// --- SCI (Sierra) ---
  	{"kq1",      NULL, "King's Quest I",                 QuestEngine::Sci, 0, "kq1"},
  	{"kq4",      NULL, "King's Quest IV",                QuestEngine::Sci, 0, "kq4"},
-@@ -513,7 +527,10 @@
+@@ -107,6 +121,11 @@
+ 	{"islandbrain",NULL, "Island of Dr. Brain",          QuestEngine::Sci, 0, "islandbrain"},
+ 	{"mothergoose",NULL, "Mixed-Up Mother Goose",        QuestEngine::Sci, 0, "mothergoose"},
+ 	{"camelot",    NULL, "Conquests of Camelot",         QuestEngine::Sci, 0, "camelot"},
++
++	// --- Beneath a Steel Sky ---
++	{"sky",         NULL, "Beneath a Steel Sky",                  QuestEngine::Sky, 0, ""},
++	{"bass",        NULL, "Beneath a Steel Sky",                  QuestEngine::Sky, 0, ""},
++	{"steelsky",    NULL, "Beneath a Steel Sky",                  QuestEngine::Sky, 0, ""},
+ 
+ 	// --- Kyra ---
+ 	{"kyra2",       NULL, "Legend of Kyrandia 2: Hand of Fate",   QuestEngine::Kyra, 1, ""},
+@@ -513,7 +532,10 @@
  	drawText(surf, colA, L.legendY,     "UP/DOWN: Navigate",    kColDim);
  	drawText(surf, colB, L.legendY,     "PGUP/PGDN: Page",      kColDim);
  	drawText(surf, colA, L.legendY + 9, "ENTER: Launch",        kColDim);
@@ -1541,7 +1662,7 @@
  
  	g_system->unlockScreen();
  	g_system->updateScreen();
-@@ -683,6 +700,12 @@
+@@ -683,6 +705,12 @@
  		bool dirty = false;
  		while (sys->pollEvent(ev)) {
  			if (ev.type != Common::EVENT_KEYDOWN) continue;
@@ -1554,3 +1675,13 @@
  			if (count <= 0) continue;
  
  			int prevSel = selected;
+--- a/src/frank_quest_selector.h
++++ b/src/frank_quest_selector.h
+@@ -28,6 +28,7 @@
+ 	Kyra  = 3,
+ 	Gob   = 4,
+ 	Agi   = 5,
++	Sky   = 6,  // PicoCalc: picocalc_input.h's PICOCALC_ENGINE_SKY
+ };
+ 
+ // One entry in the detector table / selector list. `dirPath` is an

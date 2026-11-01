@@ -631,6 +631,37 @@ set(FQ_BACKEND_SOURCES
     src/backends/platform/rp2350/rp2350-system.cpp
 )
 
+# Beneath a Steel Sky: in upstream's tree, not in its build. Added by the
+# port, from the engine's module.mk (§5.4).
+set(FQ_SKY_ENGINE_SOURCES
+    src/engines/sky/autoroute.cpp
+    src/engines/sky/compact.cpp
+    src/engines/sky/control.cpp
+    src/engines/sky/debug.cpp
+    src/engines/sky/detection.cpp
+    src/engines/sky/disk.cpp
+    src/engines/sky/grid.cpp
+    src/engines/sky/hufftext.cpp
+    src/engines/sky/intro.cpp
+    src/engines/sky/logic.cpp
+    src/engines/sky/mouse.cpp
+    src/engines/sky/rnc_deco.cpp
+    src/engines/sky/screen.cpp
+    src/engines/sky/sky.cpp
+    src/engines/sky/sound.cpp
+    src/engines/sky/text.cpp
+    src/engines/sky/music/adlibchannel.cpp
+    src/engines/sky/music/adlibmusic.cpp
+    src/engines/sky/music/gmchannel.cpp
+    src/engines/sky/music/gmmusic.cpp
+    src/engines/sky/music/mt32music.cpp
+    src/engines/sky/music/musicbase.cpp
+)
+
+# Compiled here though upstream does not build them; check_sources.sh
+# accepts these and no others.
+set(FQ_ADDED_SOURCES ${FQ_SKY_ENGINE_SOURCES})
+
 # Every list the firmware compiles.
 set(FQ_ALL_SOURCE_LISTS
     FQ_MAIN_SOURCES
@@ -650,6 +681,7 @@ set(FQ_ALL_SOURCE_LISTS
     FQ_SCI_ENGINE_SOURCES
     FQ_SCUMM_ENGINE_SOURCES
     FQ_SCUMM_7_8_SOURCES
+    FQ_SKY_ENGINE_SOURCES
     FQ_BACKEND_SOURCES
 )
 

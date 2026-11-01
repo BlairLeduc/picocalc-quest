@@ -42,11 +42,13 @@ Either:
 
 Each game goes in its own folder under `/quest`, named as FRANK Quest's
 README lists (for example `monkey`, `atlantis`, `dott`, `ft`, `dig`,
-`sq3`, `kq4`, `gob1`, `kyra1`). The game list shows every folder it
-recognises. For the Sierra AGI games, `kq1`, `kq2`, `kq3`, `sq1`, `sq2`,
-`lsl1` and `pq1` are taken as AGI when the folder has a `LOGDIR` file, and
-as the later SCI remakes when it does not. The CD version of Kyrandia
-also needs FRANK Quest's `KYRA.DAT` in its folder.
+`sq3`, `kq4`, `gob1`, `kyra1`), or `sky` for Beneath a Steel Sky. The game
+list shows every folder it recognises. For the Sierra AGI games, `kq1`,
+`kq2`, `kq3`, `sq1`, `sq2`, `lsl1` and `pq1` are taken as AGI when the
+folder has a `LOGDIR` file, and as the later SCI remakes when it does not.
+The CD version of Kyrandia also needs FRANK Quest's `KYRA.DAT` in its
+folder. Beneath a Steel Sky needs `sky.dsk`, `sky.dnr` and ScummVM's
+`sky.cpt`, of 419,427 bytes.
 
 ## What runs
 
@@ -57,12 +59,13 @@ also needs FRANK Quest's `KYRA.DAT` in its folder.
 | AGI | Sierra: King's Quest I–III, Space Quest I–II, Leisure Suit Larry I, Police Quest I |
 | GOB | Coktel Vision: Gobliiins, Gobliins 2, Goblins 3 |
 | KYRA | Westwood: The Legend of Kyrandia, Hand of Fate |
+| SKY | Revolution: Beneath a Steel Sky |
 
 Played on the PicoCalc during development: Fate of Atlantis, Day of the
 Tentacle, Full Throttle and The Dig; Space Quest III and IV; King's Quest I
 and III (AGI) and Space Quest II; Gobliiins, Gobliins 2 and Goblins 3;
-Kyrandia. Other titles of these engines should run but have not been
-tried.
+Kyrandia; Beneath a Steel Sky. Other titles of these engines should run
+but have not been tried.
 
 Known problems:
 
@@ -71,6 +74,8 @@ Known problems:
 - **CD versions of the Gob games** play without music: it is on CD audio
   tracks, which the engine cannot play.
 - **SCUMM v8** (The Curse of Monkey Island) is not built.
+- **Malcolm's Revenge** (Kyrandia 3) is not offered: on the PicoCalc its
+  movie's sound cut out and it locked up at the first change of screen.
 
 ## Keys
 
@@ -86,10 +91,11 @@ Known problems:
 | Alt+1…9 / Ctrl+1…9 | SCUMM games: quick save / load slot 1–9 |
 | Ctrl+Alt+Del | Quit the game, back to the game list |
 
-The arrows start as a pointer in SCUMM, SCI, GOB and Kyrandia, and as
-arrow keys in the AGI games, where the hero walks with them. The other
-engines save from the game's own menu. Holding Up, F1 or F5 while
-switching on goes to UF2 Loader's menu, for any program.
+The arrows start as a pointer in SCUMM, SCI, GOB, Kyrandia and Beneath a
+Steel Sky, and as arrow keys in the AGI games, where the hero walks with
+them. The other engines save from the game's own menu (F5 in Beneath a
+Steel Sky). Holding Up, F1 or F5 while switching on goes to UF2 Loader's
+menu, for any program.
 
 ## Settings
 
@@ -108,6 +114,7 @@ sci_mode      = pointer
 scumm_mode    = pointer
 kyra_mode     = pointer
 gob_mode      = pointer
+sky_mode      = pointer
 opl           = mame     the AdLib emulator: mame or dosbox
 subtitles     = on       text with speech: on or off
 talkspeed     = 60       SCUMM: how long text stays, 0-255; higher is longer

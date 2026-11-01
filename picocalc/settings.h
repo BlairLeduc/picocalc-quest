@@ -22,6 +22,7 @@
  *     scumm_mode    = pointer
  *     kyra_mode     = pointer
  *     gob_mode      = pointer
+ *     sky_mode      = pointer
  *     opl           = mame       the AdLib emulator, mame or dosbox (§8.3)
  *     opl.dott      = dosbox     the same for one game, by its folder in
  *                                /quest
@@ -83,7 +84,7 @@ typedef struct {
 } settings_game_t;
 
 /* By the engine numbers of picocalc_input.h, NONE (0) unused. */
-#define SETTINGS_ENGINES 6
+#define SETTINGS_ENGINES 7
 
 typedef struct {
     uint8_t  left_button;     /* the key's code: printable ASCII, letters lower case */

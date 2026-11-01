@@ -26,7 +26,7 @@ static int failures;
     } while (0)
 
 /* The engine numbers of picocalc_input.h. */
-enum { SCUMM = 1, SCI, KYRA, GOB, AGI };
+enum { SCUMM = 1, SCI, KYRA, GOB, AGI, SKY };
 
 static settings_error_t errs[4];
 
@@ -89,6 +89,11 @@ int main(void) {
     expect("kyra_mode = keys\n", 0, "][ 100 192 11010");
     expect("gob_mode = keys\n", 0, "][ 100 192 11100");
     expect("agi_mode = pointer\n", 0, "][ 100 192 11111");
+    {
+        settings_t s;
+        CHECK(parse(&s, "") == 0 && s.pointer_mode[SKY], "sky_mode starts as the pointer");
+        CHECK(parse(&s, "sky_mode = keys\n") == 0 && !s.pointer_mode[SKY], "sky_mode = keys");
+    }
 
     /* Case, spacing, line ends, a BOM, no last line end. */
     expect("LEFT_BUTTON=Q", 0, "q[ 100 192 11110");
