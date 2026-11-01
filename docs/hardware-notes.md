@@ -396,6 +396,52 @@ OpenOCD session and keep it only when both reads agree, retrying a few
 times; or have the writer bump a sequence word before and after the update
 and discard a read whose two sequence words differ.
 
+**Flashing over SWD does not stop the audio's DMA, and OpenOCD's buffers
+can end up on the speaker.** OpenOCD's reset on the RP2350 resets only
+the cores (`SYSRESETREQ` per core), so the DMA and PWM blocks run on
+through `program`. A PWM audio output fed by DMA from a ring in SRAM keeps
+playing that ring while the cores are halted. The Raspberry Pi fork's
+`target/rp2350.cfg` puts the flash work area at `0x20010000`, 64 KB, and
+`program` writes its algorithm and data buffers there. **Seen** on a
+Plus 2 W in a PicoCalc, 2026-10-30, OpenOCD 0.12.0+dev: an image whose
+8 KB audio ring sat at `0x20014000` played loud, garbled sound through the
+speaker for the length of the next flashing. Images with the ring at
+`0x20008000` and `0x20024000` were flashed silently the same day. A
+linker change that moves `.bss` can move the ring into the work area
+without warning. Before `program`, halt and hold DMA and PWM in reset
+through RESETS' atomic set alias: `mww 0x40022000 0x00010004` (DMA bit 2,
+PWM bit 16, RP2350). The SDK's start-up takes every block out of reset
+again. **Checked by ear** the same day, the same image flashed over
+itself from the same idle screen: the old sequence (`program`, then
+`reset halt`, `resume`) was loud again; with `init`, `halt` and the
+`mww` first, it was silent.
+
+**Reset the cores before that, do not just halt.** OpenOCD's `halt`
+stops core 0 alone, and the RP2350's timer pauses while either core is
+halted in debug, so core 1 stops where it is: inside a southbridge I²C
+transaction, it holds the bus for the whole flashing. **Seen** on the
+same board, 2026-10-30: with `init`, `halt`, `mww`, `program`, the
+southbridge's MCU did not answer after three flashings of four, until a
+power cycle (the PicoCalc trap of §6.1). With `init`, `reset halt`, `mww`,
+`program`, four flashings in a row, three of them with a game running,
+left it answering every time.
+
+**Setting the Debug Probe's UART again loses bytes in flight.** A
+second program that opens the port and sets it up (`stty`, the same
+115200 8-N-1 it already has) while a capture reads it makes the probe
+set its UART up again, and bytes on the way are lost. **Seen** on the
+same board, 2026-10-31: `keys.sh` set the port up on every key, about
+300 times in a 30-minute soak, and 4 whole heartbeat lines were missing
+from the capture while the firmware's log ring dropped none. Setting it
+up only when no other program holds it, the next two 30-minute runs lost
+none.
+
+**The chip's reset record outlives a debugger reset.** POWMAN's
+`CHIP_RESET` names the last reset of the whole chip, and OpenOCD's
+resets only the cores, so after a flash it still names the last
+power-on; the watchdog's `REASON` names a forced or timed watchdog
+reset. The banner prints both (found 2026-10-31).
+
 ---
 
 ## 3. Clocks, voltage and overclocking
@@ -520,6 +566,30 @@ PSRAM's chip select (`m[1]`) around these calls, but not the flash's own
 `flash_do_cmd` after the clock went up left the timing at clkdiv 3,
 RX delay 2. Read the flash's ids before raising the clock, or write the
 timing again after every flash command.
+
+**The flash's read window at 300 MHz, measured.** On a Pimoroni Pico
+Plus 2 W (RP2350B rev 2, 16 MB flash) in a PicoCalc, 2026-10-30, core
+rail 1.20 V, room temperature: a 3.76 MB image read twice per setting
+through the uncached, unallocating XIP window (`0x14000000`), from SRAM
+with interrupts off, each read's checksum compared against one taken at
+the timing in use, divider 4 and RX delay 4. That reference could pass a
+timing that corrupts the same way every time, so a second run on
+2026-10-31 took it at 50 MHz (divider 6, RX delay 2) instead. The RX
+delays (in half `clk_sys` cycles) that read the image intact, first run
+and second:
+
+| Divider | Flash clock | RX delays intact, first run | Second run, 50 MHz reference | One read of the image |
+|---:|---:|---|---|---:|
+| 6 | 50 MHz | 0–7 | 0–7 | 170–180 ms |
+| 5 | 60 MHz | 0–7 | 0–7 | 145–157 ms |
+| 4 | 75 MHz | 1–7 (0 failed on one boot of two) | 0–7 | 123–132 ms |
+| 3 | 100 MHz | 2–6 | 1–6 | 97–110 ms |
+| 2 | 150 MHz | 3–5 | 2–5 | 75–85 ms |
+
+The window narrows and moves later as the clock rises, and a setting at
+its edge passes on one boot and fails on the next, so take the middle of
+the window, not an edge that passed once. One board, one temperature:
+qualify again on another board, or hot.
 
 **The core rail survives a reset.** A 150 MHz build flashed over SWD after a
 300 MHz run, or restarted by the watchdog, comes back with the rail still at

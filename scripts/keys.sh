@@ -36,10 +36,22 @@ if [ -z "$dev" ]; then
 fi
 gap="${KEYS_GAP:-0.1}"
 
-if [ "$(uname)" = Darwin ]; then
-    stty -f "$dev" 115200 raw -echo cs8 -cstopb -parenb clocal
-else
-    stty -F "$dev" 115200 raw -echo cs8 -cstopb -parenb clocal
+# Set the port up only when nothing holds it: capture.sh has set it and
+# holds it open, and setting it again makes the Debug Probe set its UART
+# up again, which loses bytes in flight (found in M8: 4 heartbeats in a
+# 30-minute soak).
+# Without lsof there is no telling, and setting it up under a capture
+# loses its bytes, so refuse.
+if ! command -v lsof >/dev/null 2>&1; then
+    echo "keys.sh: lsof is needed to tell whether capture.sh holds $dev" >&2
+    exit 1
+fi
+if ! lsof "$dev" >/dev/null 2>&1; then
+    if [ "$(uname)" = Darwin ]; then
+        stty -f "$dev" 115200 raw -echo cs8 -cstopb -parenb clocal
+    else
+        stty -F "$dev" 115200 raw -echo cs8 -cstopb -parenb clocal
+    fi
 fi
 exec 4>"$dev"
 

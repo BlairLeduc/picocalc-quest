@@ -29,6 +29,13 @@ void settings_defaults(settings_t *s) {
     s->pointer_mode[ENGINE_KYRA] = true;
     s->pointer_mode[ENGINE_GOB] = true;
     s->pointer_mode[ENGINE_AGI] = false;
+    /* MAME's, the owner's choice by ear (M8); DOSBox's, a third to a
+     * quarter of the cost, for a game that has no room for it (§8.3). */
+    s->opl = SETTINGS_OPL_MAME;
+}
+
+const char *settings_opl_driver(unsigned opl) {
+    return opl == SETTINGS_OPL_MAME ? "mame" : "db";
 }
 
 int settings_gain(unsigned volume) {
@@ -79,6 +86,43 @@ static const char *mode(const char *p, size_t n, bool *pointer) {
     return NULL;
 }
 
+static const char *opl(const char *p, size_t n, uint8_t *out) {
+    if (same(p, n, "dosbox")) *out = SETTINGS_OPL_DOSBOX;
+    else if (same(p, n, "mame")) *out = SETTINGS_OPL_MAME;
+    else return "dosbox or mame";
+    return NULL;
+}
+
+/* opl.<folder>: a game's own OPL emulator, replacing an earlier line for
+ * the same folder. */
+static const char *opl_game(settings_t *s, const char *f, size_t fn, const char *v, size_t vn) {
+    if (fn == 0 || fn >= SETTINGS_FOLDER_MAX) return "a folder name of 1 to 23 characters";
+    for (size_t i = 0; i < fn; i++) {
+        if (f[i] <= ' ' || f[i] > '~' || f[i] == '/') return "a folder name of 1 to 23 characters";
+    }
+    uint8_t which;
+    const char *why = opl(v, vn, &which);
+    if (why != NULL) return why;
+    unsigned i = 0;
+    while (i < s->opl_games && !same(f, fn, s->opl_game[i].folder)) i++;
+    if (i == SETTINGS_OPL_GAMES) return "more than 16 games";
+    if (i == s->opl_games) {
+        for (size_t j = 0; j < fn; j++) s->opl_game[i].folder[j] = lower(f[j]);
+        s->opl_game[i].folder[fn] = '\0';
+        s->opl_games++;
+    }
+    s->opl_game[i].opl = which;
+    return NULL;
+}
+
+unsigned settings_opl_for(const settings_t *s, const char *folder) {
+    size_t n = strlen(folder);
+    for (unsigned i = 0; i < s->opl_games; i++) {
+        if (same(folder, n, s->opl_game[i].folder)) return s->opl_game[i].opl;
+    }
+    return s->opl;
+}
+
 static const struct {
     const char *name;
     int         engine;
@@ -108,6 +152,8 @@ static const char *apply(settings_t *s, const char *k, size_t kn, const char *v,
     if (same(k, kn, "volume")) {
         return number(v, vn, 0, SETTINGS_VOLUME_MAX, &s->volume) ? NULL : "a number, 0 to 200";
     }
+    if (same(k, kn, "opl")) return opl(v, vn, &s->opl);
+    if (kn > 4 && same(k, 4, "opl.")) return opl_game(s, k + 4, kn - 4, v, vn);
     for (size_t i = 0; i < sizeof s_modes / sizeof s_modes[0]; i++) {
         if (same(k, kn, s_modes[i].name)) return mode(v, vn, &s->pointer_mode[s_modes[i].engine]);
     }
@@ -244,11 +290,15 @@ void settings_load(void) {
 
     const settings_t *s = &g_settings;
     printf("  settings     : buttons %c left, %c right; pointer %u%%; volume %u%%; "
-           "pointer mode in scumm %d sci %d kyra %d gob %d agi %d\n",
+           "pointer mode in scumm %d sci %d kyra %d gob %d agi %d; opl %s\n",
            s->left_button, s->right_button, s->pointer_speed, s->volume,
            s->pointer_mode[ENGINE_SCUMM], s->pointer_mode[ENGINE_SCI],
            s->pointer_mode[ENGINE_KYRA], s->pointer_mode[ENGINE_GOB],
-           s->pointer_mode[ENGINE_AGI]);
+           s->pointer_mode[ENGINE_AGI], settings_opl_driver(s->opl));
+    for (unsigned i = 0; i < s->opl_games; i++) {
+        printf("  settings     : opl %s in /quest/%s\n", settings_opl_driver(s->opl_game[i].opl),
+               s->opl_game[i].folder);
+    }
 }
 
 void settings_announce(void) {

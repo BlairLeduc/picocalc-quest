@@ -25,6 +25,24 @@
  /* get the current time */
  DWORD get_fattime (void)
  {
+--- a/src/audio/audiodev/opl.cpp
++++ b/src/audio/audiodev/opl.cpp
+@@ -123,10 +123,11 @@
+ 		} else if ((flags & driverDesc->flags)) {
+ 			return drv;
+ 		} else {
+-			// Else we will output a warning and just
+-			// return that no valid driver is found.
+-			warning("Your selected OPL driver \"%s\" does not support type %d emulation, which is requested by your game", _drivers[drv].description, type);
+-			return -1;
++			// PicoCalc: the first driver that does, as for "auto", so
++			// SCI's two OPL2s get DOSBox's in stereo when MAME's is chosen,
++			// rather than one OPL2 in mono (picocalc-quest design.md §8.3,
++			// M8). Upstream returns that no valid driver is found.
++			warning("Your selected OPL driver \"%s\" does not support type %d emulation, which is requested by your game; using the first that does", _drivers[drv].description, type);
+ 		}
+ 	}
+ 
 --- a/src/backends/events/default/default-events.cpp
 +++ b/src/backends/events/default/default-events.cpp
 @@ -109,6 +109,25 @@
@@ -55,16 +73,18 @@
  				// ascii value instead of the keycode to detect the backspace
 --- a/src/backends/platform/rp2350/rp2350-minimal.cpp
 +++ b/src/backends/platform/rp2350/rp2350-minimal.cpp
-@@ -23,6 +23,8 @@
+@@ -23,6 +23,10 @@
  // PS/2 input keeps working even when USB HID is enabled in parallel.
  #include "ps2.h"
  #include "ps2kbd_wrapper.h"
 +// picocalc-quest: keys from the PicoCalc's keyboard (design.md §9.1).
 +#include "picocalc_input.h"
++// picocalc-quest: the rows each frame changes (design.md §7.2, M8).
++#include "picocalc_frame.h"
  
  #ifdef USB_HID_ENABLED
  #include "usbkbd_wrapper.h"
-@@ -235,19 +237,9 @@
+@@ -235,19 +239,9 @@
      // state machines (pio0 for kbd, pio1 for mouse) and don't share
      // hardware with the native USB port. USB HID, when enabled,
      // layers on top so users can plug either kind of peripheral.
@@ -86,14 +106,125 @@
  
  #ifdef USB_HID_ENABLED
      printf("  Initializing USB HID keyboard...\n");
-@@ -476,6 +468,22 @@
+@@ -361,9 +355,26 @@
+     }
  }
  
- void cabal_set_mouse_pos(int x, int y) {
-+    g_state.cursorX = x;
-+    g_state.cursorY = y;
++// PicoCalc: the game's screen rows y to y + h - 1 change in the next
++// frame; and every row, letterbox too (picocalc-quest design.md §7.2).
++extern "C" void cabal_mark_screen_rows(int y, int h) {
++    picocalc_frame_mark((240 - g_state.screenHeight) / 2 + y, h);
 +}
 +
++extern "C" void cabal_mark_all_rows(void) {
++    picocalc_frame_mark(0, 240);
++}
++
++// PicoCalc: what the cursor drawn in the last frame was, so a change to
++// it refills the rows it was on (picocalc_frame_cursor()).
++static uint32_t s_cursorShape;
++static uint32_t s_drawnShape;
++static int s_drawnX = -1, s_drawnHotX = -1;
++
+ void cabal_update_screen(void) {
+     static uint32_t total_update_time = 0;
+     static int update_count = 0;
++    static int lastYOffset = -1;
+     uint32_t start = time_us_32();
+ 
+     update_hardware_palette();
+@@ -375,35 +386,58 @@
+     // Calculate vertical centering offset (320x200 in 320x240)
+     int yOffset = (240 - g_state.screenHeight) / 2;
+ 
+-    // Clear top border
+-    if (yOffset > 0) {
+-        memset(g_state.framebuffer, 0, 320 * yOffset);
+-    }
+-
+     // Select source surface
+     CabalSurface *src = g_state.overlayVisible ? &g_state.overlay : &g_state.screen;
+     if (!src->pixels) return;
+ 
+-    // Copy to framebuffer
+-    uint8_t *dst = g_state.framebuffer + yOffset * 320;
+-    const uint8_t *srcPtr = src->pixels;
+-    int copyHeight = g_state.screenHeight;
+-    if (yOffset + copyHeight > 240) {
+-        copyHeight = 240 - yOffset;
++    // PicoCalc: only the rows this buffer has not had since they last
++    // changed are copied, the letterbox's among them (design.md §7.2,
++    // M8); upstream copied all 240 each frame. A new letterbox changes
++    // every row, and the cursor's rows change when it does.
++    if (yOffset != lastYOffset) {
++        cabal_mark_all_rows();
++        lastYOffset = yOffset;
+     }
++    bool cursor = g_state.cursorVisible && !g_state.overlayVisible && g_state.cursorData &&
++                  g_state.cursorW > 0 && g_state.cursorW <= CABAL_MAX_CURSOR_DIM &&
++                  g_state.cursorH > 0 && g_state.cursorH <= CABAL_MAX_CURSOR_DIM;
++    int cursorY = g_state.cursorY - g_state.cursorHotY + yOffset;
++    bool moved = cursor && (g_state.cursorX != s_drawnX || g_state.cursorHotX != s_drawnHotX ||
++                            s_cursorShape != s_drawnShape);
++    picocalc_frame_cursor(cursorY, cursor ? g_state.cursorH : 0, moved);
++    s_drawnX = g_state.cursorX;
++    s_drawnHotX = g_state.cursorHotX;
++    s_drawnShape = s_cursorShape;
+ 
+-    for (int row = 0; row < copyHeight; row++) {
+-        int copyWidth = (src->width < 320) ? src->width : 320;
+-        memcpy(dst, srcPtr, copyWidth);
+-        srcPtr += src->pitch;
+-        dst += 320;
++    int copyWidth = (src->width < 320) ? src->width : 320;
++    for (int row = 0; row < 240; row++) {
++        if (!picocalc_frame_stale(row)) continue;
++        uint8_t *dst = g_state.framebuffer + row * 320;
++        int y = row - yOffset;
++        if (y < 0 || y >= g_state.screenHeight) {
++            memset(dst, 0, 320);
++        } else {
++            memcpy(dst, src->pixels + y * src->pitch, copyWidth);
++        }
+     }
+-
+-    // Clear bottom border
+-    int bottomY = yOffset + g_state.screenHeight;
+-    if (bottomY < 240) {
+-        memset(g_state.framebuffer + bottomY * 320, 0, 320 * (240 - bottomY));
++#if PICOCALC_QUEST_SCREEN_CHECK
++    // The diagnostic build's check that the marks miss nothing: every
++    // game row of the buffer against the screen, but the cursor's, which
++    // hold the cursor drawn last time.
++    static uint32_t rowsMissed, rowsReported, rowsAt;
++    for (int y = 0; y < g_state.screenHeight && y + yOffset < 240; y++) {
++        int row = y + yOffset;
++        if (cursor && row >= cursorY && row < cursorY + g_state.cursorH) continue;
++        if (memcmp(g_state.framebuffer + row * 320, src->pixels + y * src->pitch, copyWidth) != 0)
++            rowsMissed++;
+     }
++    if (rowsMissed != rowsReported && start / 1000 - rowsAt >= 1000) {
++        printf("picocalc-quest: row check: %lu row(s) stale\n",
++               (unsigned long)(rowsMissed - rowsReported));
++        rowsReported = rowsMissed;
++        rowsAt = start / 1000;
++    }
++#endif
+ 
+     // Draw cursor (now on back buffer, not displayed yet)
+     if (g_state.cursorVisible && !g_state.overlayVisible) {
+@@ -437,6 +471,7 @@
+         memset(g_state.screen.pixels, color,
+                g_state.screen.width * g_state.screen.height);
+     }
++    cabal_mark_all_rows();
+ }
+ 
+ int cabal_screen_width(void) {
+@@ -480,6 +515,22 @@
+     g_state.cursorY = y;
+ }
+ 
 +// PicoCalc: an engine's warp moves the place mouse motion is added to as
 +// well as the cursor drawn, or the next motion starts from where the
 +// pointer was before the warp (picocalc-quest design.md §9.3; found in
@@ -106,10 +237,22 @@
 +    if (y >= g_state.screenHeight) y = g_state.screenHeight - 1;
 +    g_state.mouseX = x;
 +    g_state.mouseY = y;
-     g_state.cursorX = x;
-     g_state.cursorY = y;
++    g_state.cursorX = x;
++    g_state.cursorY = y;
++}
++
+ // Static cursor buffer to avoid repeated allocations; sized for the
+ // largest cursor any supported engine uses (see CABAL_MAX_CURSOR_DIM
+ // at the top of this file).
+@@ -506,6 +557,7 @@
+         memcpy(g_state.cursorData + y * dstW, data + y * srcW, dstW);
+     }
+     (void)srcH;
++    s_cursorShape++;
  }
-@@ -681,56 +689,18 @@
+ 
+ //============================================================================
+@@ -681,56 +733,18 @@
      static uint32_t last_fps_report = 0;
      uint32_t start = time_us_32();
  
@@ -188,7 +331,7 @@
  // Audio callback function called from C audio driver
  #ifdef USE_I2S_AUDIO
  extern "C" void cabal_audio_set_mixer_callback(void (*callback)(uint8_t *stream, int len));
-@@ -43,6 +47,35 @@
+@@ -43,6 +47,52 @@
  	if (g_mixer) {
  		g_mixer->mixCallback(stream, len);
  	}
@@ -202,6 +345,23 @@
 +// updateScreen() far more often than they draw, and each frame is a
 +// 64 KB copy in PSRAM. One OSystem exists at a time.
 +static bool s_screenDirty = true;
++
++// PicoCalc: and which rows, so a frame copies and presents only those
++// (picocalc-quest design.md §7.2, M8): a rectangle's rows, or all of
++// them. The cursor's rows are the minimal backend's to mark.
++extern "C" void cabal_mark_screen_rows(int y, int h);
++extern "C" void cabal_mark_all_rows(void);
++
++static void markRows(int y, int h) {
++	s_screenDirty = true;
++	cabal_mark_screen_rows(y, h);
++}
++
++static void markAll() {
++	s_screenDirty = true;
++	cabal_mark_all_rows();
++}
++
 +static int s_shownMouseX = -1, s_shownMouseY = -1;
 +static bool s_shownMouseVisible = false;
 +
@@ -224,15 +384,15 @@
  }
  #endif
  
-@@ -61,6 +94,7 @@
+@@ -61,6 +111,7 @@
  
  	memset(&_cursor, 0, sizeof(_cursor));
  	memset(_palette, 0, sizeof(_palette));
-+	s_screenDirty = true;
++	markAll();
  }
  
  OSystem_RP2350::~OSystem_RP2350() {
-@@ -136,8 +170,9 @@
+@@ -136,8 +187,9 @@
  	// Record start time
  	_startTime = cabal_get_millis();
  
@@ -244,32 +404,32 @@
  	_mixer->setReady(true);
  	g_mixer = _mixer;
  
-@@ -207,6 +242,7 @@
+@@ -207,6 +259,7 @@
  
  	// Create overlay surface (same size, 8bpp for simplicity)
  	_overlay.create(width, height, Graphics::PixelFormat::createFormatCLUT8());
-+	s_screenDirty = true;
++	markAll();
  }
  
  int16 OSystem_RP2350::getHeight() {
-@@ -249,9 +285,12 @@
+@@ -249,9 +302,12 @@
  		src += pitch;
  		dst += dstPitch;
  	}
-+	s_screenDirty = true;
++	markRows(y, h);
  }
  
  Graphics::Surface *OSystem_RP2350::lockScreen() {
 +	// The engine may write anywhere until it unlocks.
-+	s_screenDirty = true;
++	markAll();
  	return &_screen;
  }
  
-@@ -263,30 +302,62 @@
+@@ -263,31 +319,63 @@
  	if (_screen.getPixels()) {
  		memset(_screen.getPixels(), col, _screen.getWidth() * _screen.getHeight());
  	}
-+	s_screenDirty = true;
++	markAll();
  }
  
  void OSystem_RP2350::updateScreen() {
@@ -283,9 +443,6 @@
 +		s_shownMouseX = _mouseX;
 +		s_shownMouseY = _mouseY;
 +		s_shownMouseVisible = _mouseVisible;
-+
-+		// Update palette if needed
-+		updatePalette();
  
 -	// Copy to minimal backend
 -	CabalSurface *cabalScreen = cabal_lock_screen();
@@ -295,6 +452,9 @@
 -			src = (const byte *)_overlay.getPixels();
 -		} else {
 -			src = (const byte *)_screen.getPixels();
++		// Update palette if needed
++		updatePalette();
++
 +		// PicoCalc: the minimal backend reads this surface directly for
 +		// the one frame, in place of a copy into its own (§7.2).
 +		CabalSurface *cabalScreen = cabal_lock_screen();
@@ -321,7 +481,7 @@
 -	cabal_update_screen();
 +		// Push to display
 +		cabal_update_screen();
-+
+ 
 +		if (cabalScreen) cabalScreen->pixels = own;
 +		cabal_unlock_screen();
 +#if PICOCALC_QUEST_SCREEN_CHECK
@@ -342,40 +502,41 @@
 +		}
 +#endif
 +	}
- 
++
  	// Drive the DefaultTimerManager — SCI's music/sound engine and
  	// several other subsystems register ~60 Hz callbacks here, and
-@@ -308,11 +379,13 @@
+ 	// without the pulse cutscenes and fades stall mid-sequence.
+@@ -308,11 +396,13 @@
  
  void OSystem_RP2350::showOverlay() {
  	_overlayVisible = true;
-+	s_screenDirty = true;
++	markAll();
  	cabal_show_overlay();
  }
  
  void OSystem_RP2350::hideOverlay() {
  	_overlayVisible = false;
-+	s_screenDirty = true;
++	markAll();
  	cabal_hide_overlay();
  }
  
-@@ -325,6 +398,7 @@
+@@ -325,6 +415,7 @@
  		// Copy screen to overlay
  		memcpy(_overlay.getPixels(), _screen.getPixels(), _screenWidth * _screenHeight);
  	}
-+	s_screenDirty = true;
++	markAll();
  }
  
  void OSystem_RP2350::grabOverlay(void *buf, int pitch) {
-@@ -352,6 +426,7 @@
+@@ -352,6 +443,7 @@
  		src += pitch;
  		dst += dstPitch;
  	}
-+	s_screenDirty = true;
++	markRows(y, h);
  }
  
  int16 OSystem_RP2350::getOverlayHeight() {
-@@ -374,15 +449,27 @@
+@@ -374,15 +466,27 @@
  	return prev;
  }
  
@@ -404,7 +565,7 @@
  	if (_cursor.data) {
  		delete[] _cursor.data;
  	}
-@@ -426,16 +513,18 @@
+@@ -426,16 +530,18 @@
  }
  
  void OSystem_RP2350::getTimeAndDate(TimeDate &t) const {
@@ -433,7 +594,7 @@
  }
  
  extern "C" int frank_quest_cad_consume(void);
-@@ -534,39 +623,63 @@
+@@ -534,39 +640,63 @@
  // else touches the shared state. HDMI runs on DMA_IRQ_0 and stays
  // enabled.
  //
@@ -509,7 +670,7 @@
  }
  
  // Audio
-@@ -587,4 +700,7 @@
+@@ -587,4 +717,7 @@
  
  void OSystem_RP2350::logMessage(LogMessageType::Type type, const char *message) {
  	printf("%s\n", message);
@@ -517,6 +678,24 @@
 +	if (type == LogMessageType::kError)
 +		picocalc_fatal_message(message);
  }
+--- a/src/backends/timer/default/default-timer.h
++++ b/src/backends/timer/default/default-timer.h
+@@ -34,7 +34,15 @@
+ private:
+ 	typedef Common::HashMap<Common::String, TimerProc, Common::IgnoreCase_Hash, Common::IgnoreCase_EqualTo> TimerSlotMap;
+ 
++#if PICOCALC_QUEST_THREAD_LOCKS
++	// PicoCalc: no lock. The timers are installed, removed and run on
++	// core 0's thread alone, and a lock masks the audio IRQ, here for
++	// every timer callback, card reads and all (picocalc-quest design.md
++	// §8.2, M8).
++	Common::MutexRef _mutex = nullptr;
++#else
+ 	Common::Mutex _mutex;
++#endif
+ 	TimerSlot *_head;
+ 	TimerSlotMap _callbacks;
+ 
 --- a/src/board_config.h
 +++ b/src/board_config.h
 @@ -15,39 +15,25 @@
@@ -699,6 +878,22 @@
 +const KYRAGameDescription *frank_quest_kyra_descriptions() {
 +	return adGameDescs;
 +}
+--- a/src/engines/kyra/resource.cpp
++++ b/src/engines/kyra/resource.cpp
+@@ -341,7 +341,13 @@
+ 				/* Snapshot heap state before the PAK parse so a corruption
+ 				 * triggered during load can be matched against the
+ 				 * pre-load chunk list. */
++				// PicoCalc: not taken. It prints some 35 lines an archive,
++				// more than the UART drains, so the log drops lines at every
++				// launch, and walks the heap under its lock, which masks the
++				// audio IRQ (picocalc-quest design.md §14.2, M8).
++#if 0
+ 				frank_quest_heap_walk();
++#endif
+ 				archive = (*i)->load(member, *stream);
+ 				break;
+ 			} else {
 --- a/src/engines/sci/detection.cpp
 +++ b/src/engines/sci/detection.cpp
 @@ -843,3 +843,9 @@
@@ -711,9 +906,42 @@
 +const ADGameDescription *frank_quest_sci_descriptions() {
 +	return Sci::Sci::SciGameDescriptions;  // the tables open Sci inside Sci
 +}
+--- a/src/engines/sci/sound/drivers/adlib.cpp
++++ b/src/engines/sci/sound/drivers/adlib.cpp
+@@ -36,7 +36,10 @@
+ 
+ namespace Sci {
+ 
+-#ifdef __DC__
++// PicoCalc: mono, one OPL2, as on the Dreamcast, in a build that asks for
++// it; stereo is two OPL2s, which DOSBox's emulator runs as an OPL3, about
++// twice the synthesis (picocalc-quest design.md §8.3, M8).
++#if defined(__DC__) || PICOCALC_QUEST_SCI_OPL_MONO
+ #define STEREO false
+ #else
+ #define STEREO true
+--- a/src/engines/scumm/imuse_digi/dimuse.h
++++ b/src/engines/scumm/imuse_digi/dimuse.h
+@@ -69,7 +69,16 @@
+ 
+ 	Track *_track[MAX_DIGITAL_TRACKS + MAX_DIGITAL_FADETRACKS];
+ 
++#if PICOCALC_QUEST_THREAD_LOCKS
++	// PicoCalc: no lock. iMUSE's state is touched on core 0's thread
++	// alone, its timer run there, and the mixer reaches it only through
++	// the streams and the mixer, which lock for themselves; a lock here
++	// masks the audio IRQ across card reads (picocalc-quest design.md
++	// §8.2, M8).
++	Common::MutexRef _mutex = nullptr;
++#else
+ 	Common::Mutex _mutex;
++#endif
+ 	ScummEngine_v7 *_vm;
+ 	Audio::Mixer *_mixer;
+ 	ImuseDigiSndMgr *_sound;
 --- a/src/frank_quest_main.cpp
 +++ b/src/frank_quest_main.cpp
-@@ -15,6 +15,7 @@
+@@ -15,9 +15,11 @@
  #include "backends/platform/rp2350/rp2350-minimal.h"
  #include "frank_quest_fs.h"
  #include "frank_quest_selector.h"
@@ -721,7 +949,11 @@
  
  extern "C" {
  #include "psram_allocator.h"
-@@ -29,6 +30,9 @@
++#include "settings.h"
+ }
+ 
+ #include "common/system.h"
+@@ -29,6 +31,9 @@
  #include "engines/advancedDetector.h"
  #include "base/plugins.h"
  #include "common/fs.h"
@@ -731,12 +963,10 @@
  #include "common/archive.h"
  
  // GOB Engine includes
-@@ -233,6 +237,21 @@
- 
-     printf("GOB Detection: No known files found\n");
+@@ -235,6 +240,21 @@
      return 0;  // Unknown
-+}
-+
+ }
+ 
 +// PicoCalc: a config domain per game folder, quest-<folder>. Engines name
 +// their save files after the domain, and upstream's one domain per engine
 +// gave every SCUMM game the same quest-scumm.s01, so one game's save
@@ -750,10 +980,12 @@
 +        if (!Common::isAlnum(domain[i]) && domain[i] != '-' && domain[i] != '_')
 +            domain.setChar('_', i);
 +    ConfMan.setActiveDomain(domain);
- }
- 
++}
++
  // Forward declaration
-@@ -257,12 +276,127 @@
+ static bool launchGOBGameWithVersion(const char *gamePath, int gobVersion);
+ 
+@@ -257,12 +277,127 @@
  
  // GOB (Gobliins) game launcher with explicit version
  // Returns true if a game was found and launched
@@ -882,7 +1114,7 @@
  
      // Set default audio/config values that Engine::syncSoundSettings() expects
      ConfMan.setInt("music_volume", 192);
-@@ -289,7 +423,8 @@
+@@ -289,7 +424,8 @@
      // GOB-specific settings
      ConfMan.setBool("copy_protection", false);  // Skip copy protection
      ConfMan.set("language", "en");
@@ -892,7 +1124,7 @@
  
      // Graphics settings
      ConfMan.set("gfx_mode", "normal");
-@@ -326,7 +461,13 @@
+@@ -326,7 +462,13 @@
      memset(&gameDesc, 0, sizeof(gameDesc));
  
      // Set up the ADGameDescription part based on detected version
@@ -907,7 +1139,7 @@
          gameDesc.desc.gameid = "gob3";
          gameDesc.desc.extra = "VGA";
          gameDesc.gameType = Gob::kGameTypeGob3;
-@@ -346,13 +487,15 @@
+@@ -346,13 +488,15 @@
          printf("GOB: Configuring for Gobliiins 1 (EGA)\n");
      }
  
@@ -930,7 +1162,7 @@
  
      printf("GOB: Creating engine instance...\n");
  
-@@ -378,10 +521,15 @@
+@@ -378,10 +522,15 @@
  static bool launchAGIGame(const char *gamePath) {
      printf("AGI: Attempting to launch game from %s\n", gamePath);
  
@@ -947,7 +1179,7 @@
      // Set default audio/config values that Engine::syncSoundSettings() expects
      ConfMan.setInt("music_volume", 192);
      ConfMan.setInt("sfx_volume", 192);
-@@ -578,8 +726,9 @@
+@@ -578,8 +727,9 @@
             gameId == 1 ? "Kyrandia 2 (Hand of Fate)" : "Kyrandia 1 (Legend of Kyrandia)",
             gamePath);
  
@@ -958,7 +1190,7 @@
  
      // Audio/config defaults
      ConfMan.setInt("music_volume", 192);
-@@ -614,20 +763,30 @@
+@@ -614,20 +764,30 @@
      static KYRAGameDescription gameDesc;
      memset(&gameDesc, 0, sizeof(gameDesc));
  
@@ -1002,7 +1234,7 @@
  
      printf("KYRA: Creating engine...\n");
      ::Engine *engine = (gameId == 1)
-@@ -708,8 +867,9 @@
+@@ -708,8 +868,9 @@
      printf("SCI: Launching game from %s (id=%s)\n", gamePath,
             gameIdStr ? gameIdStr : "(auto)");
  
@@ -1013,7 +1245,7 @@
  
      ConfMan.setInt("music_volume", 192);
      ConfMan.setInt("sfx_volume", 192);
-@@ -736,7 +896,11 @@
+@@ -736,7 +897,11 @@
      // SCI-specific prefs
      ConfMan.setBool("copy_protection", false);
      ConfMan.setBool("prefer_digitalsfx", false);
@@ -1026,7 +1258,7 @@
      ConfMan.setBool("enable_black_lined_video", false);
      ConfMan.setBool("windows_cursors", false);
      ConfMan.setBool("silver_cursors", false);
-@@ -763,12 +927,16 @@
+@@ -763,12 +928,16 @@
  
      static ADGameDescription gameDesc;
      memset(&gameDesc, 0, sizeof(gameDesc));
@@ -1049,7 +1281,7 @@
  
      ConfMan.set("gameid", gameDesc.gameid);
  
-@@ -867,8 +1035,9 @@
+@@ -867,8 +1036,9 @@
      printf("SCUMM: Launching %s (v%d, id=%s) from %s\n",
             info->gameid, info->version, info->gameid, gamePath);
  
@@ -1060,17 +1292,29 @@
  
      ConfMan.setInt("music_volume", 192);
      ConfMan.setInt("sfx_volume", 192);
-@@ -1028,6 +1197,9 @@
+@@ -1028,12 +1198,21 @@
      ConfMan.registerDefault("language",                        "en");
      ConfMan.registerDefault("gfx_mode",                        "normal");
      ConfMan.registerDefault("render_mode",                     "");
-+    // PicoCalc: the OPL emulator, "db" (DOSBox) or "mame", from the build
-+    // (picocalc-quest design.md §8.3): it is most of the mixer's cost.
-+    ConfMan.registerDefault("opl_driver",                      PICOCALC_QUEST_OPL);
++    // PicoCalc: the OPL emulator, "db" (DOSBox) or "mame", from
++    // picocalc.ini (picocalc-quest design.md §8.3, §10.3): it is most of
++    // the mixer's cost.
++    ConfMan.registerDefault("opl_driver",                      settings_opl_driver(g_settings.opl));
  }
  
  // Dispatch a QuestGame to the engine launcher it belongs to. Returns
-@@ -1164,11 +1336,16 @@
+ // true if the engine reported success; false means the engine refused
+ // to start (bad files, unsupported variant, etc.).
+ static bool dispatchGame(const QuestGame &g) {
++    // PicoCalc: the OPL emulator for this game, by its folder in /quest,
++    // from picocalc.ini (picocalc-quest design.md §8.3, §10.3).
++    const char *folder = strrchr(g.dirPath, '/');
++    folder = folder ? folder + 1 : g.dirPath;
++    ConfMan.registerDefault("opl_driver", settings_opl_driver(settings_opl_for(&g_settings, folder)));
+     switch (g.engine) {
+     case QuestEngine::Scumm:
+         return launchScummGame(g.dirPath);
+@@ -1164,11 +1343,16 @@
          // selector frame and the device looks frozen.
          frank_quest_show_loading(g);
  

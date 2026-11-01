@@ -31,7 +31,11 @@ and Ctrl+Alt+Del checked by the owner. M4 done: every engine to an
 interactive screen, the gate passed once upstream's screen copies went. M5
 done: PWM audio at 36,621 Hz with the mixer in the refill IRQ, by ear in
 one title per engine; DOSBox's OPL by default; Space Quest IV over the
-gate with audio, for M8 (§16, `milestones.md`). Upstream is pinned at commit
+gate with audio, for M8. M6 and M7 done: the pointer and full input;
+saves, settings, quit and exit. M8 done: rows copied and presented only
+when changed, hot code in SRAM, flash at 75 MHz, MAME's OPL by default
+and per game, Full Throttle's audio hold-off gone; the soak passed on
+battery with Fate of Atlantis (§16, `milestones.md`). Upstream is pinned at commit
 `949301b6ef87a5482340167378cd102fcdb82ef2` (2026-05-12, release 1.00).
 
 **Contents**
@@ -267,10 +271,14 @@ The expected patch, to be confirmed at M0:
 | `src/board_config.h` | M1/M2 layouts replaced by one PicoCalc block. |
 | `drivers/sdcard/sdcard.c` | `CLK_FAST` made overridable, set to 25 MHz (§10). Its `get_fattime()` (always 0) compiled out in favour of the PicoCalc one (§13.2). |
 | `src/backends/platform/rp2350/rp2350-system.cpp` | `updateScreen()` copies and publishes a frame only when something shown has changed, and hands its own surface to `cabal_update_screen()` in place of a second copy (§7.2; M4). `logMessage()` passes an error's message to the error page (§13.1; M4). `initBackend()` creates the mixer at the audio shim's rate, not a literal 44,100 Hz (§8.2; M5, found in M0); `lockMutex()` masks the audio IRQ by one depth count, with barriers, and does nothing inside the IRQ (§8.2; found in M5). `getTimeAndDate()` asks the PicoCalc clock, keeping upstream's made-up date as the fallback (§13.2; M7). `warpMouse()` moves the poll's place as well as the cursor (§9.3; found in M7). |
-| `src/frank_quest_main.cpp` | The Gob, SCI and Kyra launchers look the folder's game up in the engine's own ScummVM table, by its files' MD5s and sizes, and launch with that entry; upstream fixes one version per game, whatever the files (§10.2; M4). Every game gets its own config domain, `quest-<folder>`, so its own saves (AGI in M4, the rest in M7), and SCI and AGI use the games' own save screens (§10.2; M7). The OPL emulator is the build's, as upstream's `opl_driver` default (§8.3; M5). |
+| `src/frank_quest_main.cpp` | The Gob, SCI and Kyra launchers look the folder's game up in the engine's own ScummVM table, by its files' MD5s and sizes, and launch with that entry; upstream fixes one version per game, whatever the files (§10.2; M4). Every game gets its own config domain, `quest-<folder>`, so its own saves (AGI in M4, the rest in M7), and SCI and AGI use the games' own save screens (§10.2; M7). The OPL emulator is `picocalc.ini`'s, as upstream's `opl_driver` default (§8.3, §10.3; M8). |
 | `src/backends/events/default/default-events.cpp` | No key repeats of the arrows and diagonals (§9.1; found in M5). |
 | `src/frank_quest_selector.cpp` | More AGI games by folder name (§10.2; M4). Esc leaves, and the legend names where to (§13.3; M7). To come: text that names PS/2, mouse clicks or HDMI, with `src/frank_quest_welcome.cpp`. |
 | `src/engines/gob/detection/detection.cpp`, `src/engines/sci/detection.cpp`, `src/engines/kyra/detection.cpp` | A function returning the engine's ScummVM table, which is `static` (M4). |
+| `src/backends/timer/default/default-timer.h`, `src/engines/scumm/imuse_digi/dimuse.h` | The timer manager's and digital iMUSE's locks left out, so they do not mask the audio IRQ across card reads (§8.2; M8). |
+| `src/engines/kyra/resource.cpp` | No heap walk before each archive: some 35 lines an archive overran the UART, dropping log lines at every Kyrandia launch (792 in one), and the walk masks the audio IRQ (§14.2; M8). |
+| `src/audio/audiodev/opl.cpp` | A chosen OPL emulator that cannot play the chip a game asks for gives way to the first that can, as `auto` does, where upstream gives none: MAME's chosen, SCI's two OPL2s get DOSBox's in stereo (§8.3; M8). |
+| `src/engines/sci/sound/drivers/adlib.cpp` | SCI's AdLib on one OPL2 in mono, in a build that asks for it (`PICOCALC_QUEST_SCI_OPL_MONO`, off: §8.3; M8). |
 
 Each patched hunk carries a comment citing the section of this document
 that requires it (EL §14.1).
@@ -519,6 +527,16 @@ core 1 would break that protection, so the port keeps upstream's shape:
   IRQ does nothing, as nothing it guards against can run then; and a mutex
   deleted while locked gives back its share. Nine launches of SQ3, two
   minutes each, after the fix: no stop, 0 late refills.
+- Two locks that only core 0's thread takes no longer lock at all (M8,
+  `PICOCALC_QUEST_THREAD_LOCKS`, on): the timer manager's, which upstream
+  holds across every timer callback, and digital iMUSE's. Every lock masks
+  the audio IRQ, and Full Throttle's iMUSE reads the card from its timer
+  callback under both: 163 ms at a scene change in M5, 3 late refills.
+  Timers are run from the main loop here, never from the IRQ, and iMUSE
+  reaches the mixer only through its streams and the mixer, which lock for
+  themselves, so neither lock guarded anything against the IRQ. After:
+  Full Throttle for 8 min 20 s through that scene, 0 late refills. The
+  sound heard there is the game's (car doors), as on other platforms.
 
 The heartbeat's busy share counts the IRQ's time inside `cabal_delay` as
 work (`main.c`), and reports the audio's share, halves refilled, the
@@ -541,15 +559,27 @@ playing, and resizes. Counters (HW §5.8, EL §6.2): late refills (channel
 already running on entry), the mixer's longest run, and its share of
 core 0.
 
-**The OPL emulator** is the build's choice, `PICOCALC_QUEST_OPL`, set as
-upstream's `opl_driver` default for every engine (the Gob launcher's own
-`auto` removed). In Fate of Atlantis's intro (M5, 36,621 Hz): MAME's,
-which `auto` picks for OPL2, took **45–55 %** of core 0 with a longest half
-of 10.8 ms; DOSBox's took **13–18 %** and 4.4 ms. The owner heard MAME's
-as a little softer and better, DOSBox's as not bad, and chose by CPU:
-**DOSBox is the default**, MAME's a build option, to come back if M8's SRAM
-placement brings its cost down. SCI asks for a dual OPL2 in stereo, which
-only DOSBox's emulates anyway.
+**The OPL emulator** is `picocalc.ini`'s `opl` (§10.3), set as upstream's
+`opl_driver` default for every engine (the Gob launcher's own `auto`
+removed). In Fate of Atlantis's intro (M5, 36,621 Hz): MAME's, which
+`auto` picks for OPL2, took **45–55 %** of core 0 with a longest half of
+10.8 ms; DOSBox's took **13–18 %** and 4.4 ms. The owner heard MAME's as a
+little softer and better and chose DOSBox's by CPU in M5. M8 put both in
+SRAM (MAME's tables, about 136 KB, stay in the PSRAM heap) and measured
+again in the same sitting: in Fate of Atlantis MAME's audio share was
+42 % against DOSBox's 12 %, its longest half 11.4 ms of 14.0; in
+Kyrandia 29 % against 8 %. Most games have the room, so **MAME's is the
+default** (the owner, 2026-10-31), and `opl.<folder> = dosbox` gives a
+game that does not DOSBox's, by its folder in `/quest`, up to 16 games
+(`opl = dosbox` for all). An eight-title tour on MAME's: Day of the
+Tentacle's busiest 5 s 82.8 % (audio 44.5 %, longest half 12.0 ms),
+Fate of Atlantis 65.7 %, Kyrandia 56.3 %; no late refill. MAME's emulates one OPL2 only; SCI asks for two in stereo,
+and upstream then gives no emulator and SCI falls back to one in mono. The
+patched `opl.cpp` gives the first emulator that can instead, so SCI plays
+DOSBox's in stereo whichever is chosen (Space Quest III, audio 23 % either
+way). One OPL2 in mono for SCI halves its music's cost (Space Quest IV in
+play, busiest 5 s 53.8 → 39.5 %), but the owner listens on headphones and
+keeps the stereo: `PICOCALC_QUEST_SCI_OPL_MONO`, off.
 
 If the mixer costs too much, the levers in order: put the mixer, the rate
 converter and the OPL emulator in SRAM (§16, M8); a lower mixer rate (TOP
@@ -776,6 +806,8 @@ sci_mode      = pointer
 scumm_mode    = pointer
 kyra_mode     = pointer
 gob_mode      = pointer
+opl           = mame     the OPL (AdLib) emulator: mame or dosbox (§8.3)
+opl.dott      = dosbox   the same for one game, by its folder in /quest
 ```
 
 Keys and words are in any case; blank lines and lines starting `#` or `;`
@@ -1333,6 +1365,14 @@ In measured steps, each against a control build in the same sitting
    audio IRQ, across card reads (163 ms); a SMUSH frame drawn sheared at a
    scene change.
 
+**The gate in play** (the owner, 2026-10-30): a title is judged on its
+play, not on a scene that runs unthrottled. Space Quest IV's intro animates
+as fast as core 0 allows and holds it at 100 % however fast the port gets
+(found in M8: 21 frames a second at 100 % before the row levers, 45 after);
+in play it is measured like the rest. **75 % is a line to investigate,
+not a fail** (the owner, 2026-10-31): a title over it is looked into,
+and kept as it is when it plays well and no refill is late.
+
 Then a **30-minute soak** on battery, one title playing, keys typed over
 the UART for the whole run, with a script checking the log: one boot,
 heartbeats throughout, late refills, I²C errors and dropped log lines zero,
@@ -1340,6 +1380,17 @@ and the game visibly advancing (EL §11.5).
 
 **Done when** the soak passes and every lever is recorded as kept or
 dropped with its number.
+
+**Done** 2026-10-31 (`milestones.md`). Kept: the row levers (Fate of
+Atlantis 75 → 50 %, King's Quest I 51 → 11 %); SRAM tiers 1–4 (RAM
+286 KB of 448); flash at 75 MHz (1–2 points); MAME's OPL by default
+(the owner's ear), with `opl.<folder> = dosbox` per game, Day of the
+Tentacle 82.8 % on it. Dropped: SCI in mono (Space Quest IV 53.8 →
+39.5 %), for the stereo. Fixed: Full Throttle's audio hold-off (§8.2).
+Left: its porch scene and white movie patches (§19). The soak passed with
+Fate of Atlantis: 30 minutes on battery, none of 1,811 heartbeats
+missing, 0 late refills, I²C errors and dropped lines. Four runs with
+Space Quest IV stopped on a script bug of the game's at its start (§19).
 
 ### M9: Release
 
@@ -1423,8 +1474,23 @@ Every value the port depends on that has not been checked on this hardware
   their music as CD tracks; upstream's CD manager is an empty stub and
   builds no compressed-audio decoder, so they play effects and no music.
   The owner deferred it; it would take a track-file player and a decoder.
-- **Full Throttle's iMUSE mutex across card reads** and **a SMUSH picture
-  fault** at a scene change (both found in M5). M8, by the owner's choice.
+- **Two Full Throttle picture faults** (found in M5 and M8); the iMUSE
+  hold-off found with them is fixed (§8.2). In the porch scene with
+  Ripburger the backdrop is sheared and the walkers leave trails: SMUSH
+  sets the screen's pitch to its width for a movie and back at the end,
+  leaving the last frame at the movie's pitch, and the room is not
+  redrawn over it. Re-laying that frame at the screen's pitch cured the
+  shear but not the trails, and was taken out. Some movies also show
+  patches of white in their backgrounds, in the frames as decoded (every
+  row filled and sent). Both play correctly on the iPad's ScummVM. The
+  owner stopped the chase there (2026-10-31): the game plays through.
+- **Space Quest IV's script error at its start** (found in M8): in room
+  25, script 701, `turnCycle` does arithmetic on an object, or the
+  interpreter's program counter goes astray, and the game stops; the
+  soak's walking and clicking near the rope as the droids arrive hit it
+  four times in about two hours. ScummVM's patch for its bug #6076,
+  ported, did not stop it. Next: log whether the patch matches this
+  copy's script.
 - **A save and load menu for SCUMM.** Its menu is ScummVM's GUI, which
   the build leaves out; Alt+1…9 and Ctrl+1…9 save and load, with no list
   and no names. If quick saves prove too little.

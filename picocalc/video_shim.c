@@ -17,6 +17,7 @@
 #include "HDMI.h"
 #include "board_config.h"
 #include "framepool.h"
+#include "picocalc_frame.h"
 #include "psram_allocator.h"
 #include "video.h"
 
@@ -33,6 +34,7 @@ static int s_front = -1;
 static volatile bool s_ready;
 
 volatile uint32_t g_video_publish_max_us;
+volatile uint32_t g_video_rows_filled;
 
 void graphics_set_palette(uint8_t i, uint32_t color888) {
     s_pending[i] = frame_rgb565(color888);
@@ -81,16 +83,45 @@ uint8_t *cabal_get_framebuffer(void) {
     return i >= 0 ? s_pool.pixels[i] : NULL;
 }
 
+/* Core 0 alone writes the stamps; core 1 reads them without the lock
+ * (framepool.h says why a stale read is safe). */
+void picocalc_frame_mark(int y0, int n) {
+    framepool_mark(&s_pool, y0, n);
+}
+
+void picocalc_frame_cursor(int y0, int n, int moved) {
+    framepool_cursor(&s_pool, y0, n, moved);
+}
+
+int picocalc_frame_stale(int row) {
+    if (!PICOCALC_QUEST_ROW_COPY) return 1;
+    return s_filling >= 0 && framepool_stale(&s_pool, s_filling, (unsigned)row);
+}
+
 void cabal_swap_buffers(void) {
     int i = s_filling;
     if (i < 0) return;
     uint32_t t0 = time_us_32();
     memcpy(s_pool.palette[i], s_pending, sizeof(s_pending));
+    /* The rows refilled, run by run; core 1 reads past the cache, so
+     * those writes must be in the PSRAM first. The cursor drawn over a
+     * row not refilled wrote the same bytes, so the PSRAM already has
+     * them. */
+    unsigned filled = 0;
+    for (unsigned r = 0; r < FRAMEPOOL_ROWS;) {
+        if (!picocalc_frame_stale((int)r)) {
+            r++;
+            continue;
+        }
+        unsigned r0 = r;
+        while (r < FRAMEPOOL_ROWS && picocalc_frame_stale((int)r)) r++;
+        filled += r - r0;
 #if PICOCALC_QUEST_FB_READ == FB_READ_UNCACHED || PICOCALC_QUEST_FB_READ == FB_READ_DMA
-    /* Core 1 reads past the cache, so core 0's writes must be in the
-     * PSRAM first. */
-    xip_cache_clean_range((uintptr_t)s_pool.pixels[i] - XIP_BASE, CABAL_FRAMEBUFFER_SIZE);
+        xip_cache_clean_range((uintptr_t)s_pool.pixels[i] + r0 * CABAL_SCREEN_WIDTH - XIP_BASE,
+                              (r - r0) * CABAL_SCREEN_WIDTH);
 #endif
+    }
+    g_video_rows_filled += filled;
     uint32_t irq = spin_lock_blocking(s_lock);
     framepool_publish(&s_pool, i);
     spin_unlock(s_lock, irq);
@@ -125,6 +156,14 @@ const uint8_t *video_pixels(int i) {
 
 const uint16_t *video_palette(int i) {
     return s_pool.palette[i];
+}
+
+uint32_t video_frame(int i) {
+    return s_pool.held[i];
+}
+
+int video_row_changed(unsigned row, uint32_t since) {
+    return framepool_changed(&s_pool, row, since);
 }
 
 void video_counts(uint32_t *published, uint32_t *dropped) {

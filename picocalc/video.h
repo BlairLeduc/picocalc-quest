@@ -30,6 +30,22 @@
 #define PICOCALC_QUEST_FB_READ FB_READ_DMA
 #endif
 
+/* The row stamps (framepool.h, §16 M8), each half its own lever so it
+ * can be measured against a control build (EL §12):
+ *
+ *   PICOCALC_QUEST_ROW_COPY     1: core 0 refills only a buffer's stale
+ *                               rows; 0: every row of every frame.
+ *   PICOCALC_QUEST_ROW_PRESENT  1: core 1 sends only the rows changed
+ *                               since the panel's frame, or all of them
+ *                               when the palette changed; 0: all.
+ */
+#ifndef PICOCALC_QUEST_ROW_COPY
+#define PICOCALC_QUEST_ROW_COPY 1
+#endif
+#ifndef PICOCALC_QUEST_ROW_PRESENT
+#define PICOCALC_QUEST_ROW_PRESENT 1
+#endif
+
 /* Core 0, once the PSRAM heap is up and before upstream's cabal_init():
  * the three fixed slots below the mspace, cleared, and the pool. */
 void video_init(void);
@@ -44,6 +60,11 @@ void video_release(int i);
 const uint8_t  *video_pixels(int i);
 const uint16_t *video_palette(int i);
 
+/* The frame buffer i holds (1 the first), and whether a row changed
+ * after frame `since` (0: always). Core 1, between take and release. */
+uint32_t video_frame(int i);
+int      video_row_changed(unsigned row, uint32_t since);
+
 /* Frames core 0 has published, and those superseded before core 1 took
  * them, since boot. */
 void video_counts(uint32_t *published, uint32_t *dropped);
@@ -51,5 +72,8 @@ void video_counts(uint32_t *published, uint32_t *dropped);
 /* Core 0's cost of a publish (the cache clean, when the read strategy
  * needs one): the longest since boot, in microseconds. */
 extern volatile uint32_t g_video_publish_max_us;
+
+/* Rows core 0 has refilled, since boot. */
+extern volatile uint32_t g_video_rows_filled;
 
 #endif /* PICOCALC_QUEST_VIDEO_H */

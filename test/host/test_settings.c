@@ -4,7 +4,8 @@
  * spacing, CRLF, a BOM and a last line with no end; a bad line named with
  * its number and text and the rest of the file applied; a bad value
  * leaving the setting as it was; the two buttons on one key; more bad
- * lines than there is room to describe; and the volume's gain.
+ * lines than there is room to describe; the volume's gain; and the OPL
+ * emulator.
  */
 
 #include <stdio.h>
@@ -149,6 +150,56 @@ int main(void) {
         CHECK(errs[3].line == 4, "the fourth error on line 4, got %u", errs[3].line);
         CHECK(s.volume == 1, "the good line after them applied, volume %u", s.volume);
     }
+
+    /* The OPL emulator: MAME's by default, either by name in any case,
+     * a bad name leaving it as it was. */
+    {
+        settings_t s;
+        CHECK(parse(&s, "") == 0 && s.opl == SETTINGS_OPL_MAME, "opl default %u", s.opl);
+        CHECK(parse(&s, "opl = dosbox\n") == 0 && s.opl == SETTINGS_OPL_DOSBOX, "opl dosbox %u",
+              s.opl);
+        CHECK(parse(&s, "OPL = DOSBox # lighter\n") == 0 && s.opl == SETTINGS_OPL_DOSBOX,
+              "opl DOSBox %u", s.opl);
+        CHECK(parse(&s, "opl = dosbox\nopl = mame\n") == 0 && s.opl == SETTINGS_OPL_MAME,
+              "opl twice %u", s.opl);
+        CHECK(parse(&s, "opl = dosbox\nopl = nuked\n") == 1 && s.opl == SETTINGS_OPL_DOSBOX,
+              "opl bad kept %u", s.opl);
+        CHECK(strcmp(settings_opl_driver(SETTINGS_OPL_DOSBOX), "db") == 0, "driver db");
+        CHECK(strcmp(settings_opl_driver(SETTINGS_OPL_MAME), "mame") == 0, "driver mame");
+    }
+    /* A game's own: by folder in any case, the default for the rest; a
+     * later line for the same folder replaces it; bad ones not used. */
+    {
+        settings_t s;
+        CHECK(parse(&s, "opl.dott = dosbox\n") == 0 && s.opl_games == 1, "opl.dott");
+        CHECK(settings_opl_for(&s, "dott") == SETTINGS_OPL_DOSBOX, "dott dosbox");
+        CHECK(settings_opl_for(&s, "DOTT") == SETTINGS_OPL_DOSBOX, "DOTT dosbox");
+        CHECK(settings_opl_for(&s, "atlantis") == SETTINGS_OPL_MAME, "atlantis default");
+        CHECK(settings_opl_for(&s, "dot") == SETTINGS_OPL_MAME, "a prefix is not the folder");
+        CHECK(parse(&s, "opl = dosbox\nOPL.Atlantis = MAME\n") == 0, "two lines");
+        CHECK(settings_opl_for(&s, "atlantis") == SETTINGS_OPL_MAME, "atlantis mame");
+        CHECK(settings_opl_for(&s, "kyr1") == SETTINGS_OPL_DOSBOX, "kyr1 the default");
+        CHECK(parse(&s, "opl.dott = dosbox\nopl.DOTT = mame\n") == 0 && s.opl_games == 1 &&
+              settings_opl_for(&s, "dott") == SETTINGS_OPL_MAME, "replaced, one entry");
+        CHECK(parse(&s, "opl.dott = nuked\n") == 1 && s.opl_games == 0, "bad value not used");
+        CHECK(parse(&s, "opl. = dosbox\n") == 1, "no folder");
+        CHECK(parse(&s, "opl.a/b = dosbox\n") == 1, "a path is not a folder");
+        CHECK(parse(&s, "opl.abcdefghijklmnopqrstuvwx = dosbox\n") == 1, "24 characters");
+        CHECK(parse(&s, "opl.abcdefghijklmnopqrstuvw = dosbox\n") == 0 &&
+              settings_opl_for(&s, "abcdefghijklmnopqrstuvw") == SETTINGS_OPL_DOSBOX, "23 characters");
+        char text[17 * 20 + 1] = "";
+        for (int i = 0; i < 17; i++) {
+            char line[20];
+            snprintf(line, sizeof line, "opl.g%02d = dosbox\n", i);
+            strcat(text, line);
+        }
+        CHECK(parse(&s, text) == 1 && s.opl_games == SETTINGS_OPL_GAMES, "16 games, the 17th not used");
+        CHECK(settings_opl_for(&s, "g15") == SETTINGS_OPL_DOSBOX && settings_opl_for(&s, "g16") == SETTINGS_OPL_MAME,
+              "the 17th has the default");
+    }
+    expect_error("opl.dott = db\n", 0, 1, "dosbox or mame", "opl.dott = db");
+    expect("opl = mame\n", 0, DEFAULTS);
+    expect_error("opl = db\n", 0, 1, "dosbox or mame", "opl = db");
 
     /* The volume to upstream's gain, 128 at 100 %. */
     CHECK(settings_gain(0) == 0, "gain(0) = %d", settings_gain(0));

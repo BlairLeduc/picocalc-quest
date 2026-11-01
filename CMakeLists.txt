@@ -79,6 +79,28 @@ else()
     # changed with nothing marking it. A diagnostic: it costs core 0 a
     # PSRAM read of the screen per skip.
     option(PICOCALC_QUEST_SCREEN_CHECK "log screen writes the update skip missed" OFF)
+    # M8's row levers (picocalc/video.h), each OFF for its control build:
+    # core 0 refills only a frame buffer's stale rows; core 1 sends the
+    # panel only the rows changed since its last frame.
+    option(PICOCALC_QUEST_ROW_COPY "refill only the rows changed since a buffer's frame" ON)
+    option(PICOCALC_QUEST_ROW_PRESENT "present only the rows changed since the panel's frame" ON)
+    # M8's flash lever (picocalc/board.c, §11.4): the QMI divider and RX
+    # delay at 300 MHz, 0 for the bootrom's doubled (6 and 4, 50 MHz).
+    # M8 qualified 4 at RX delays 1-7 and kept 4, 4: 75 MHz.
+    # FLASH_SWEEP ON is the diagnostic build that qualifies them: every
+    # divider and RX delay read against the image's checksum at boot.
+    set(PICOCALC_QUEST_FLASH_DIV 4 CACHE STRING "flash QMI divider at 300 MHz, 0 the bootrom's doubled")
+    set(PICOCALC_QUEST_FLASH_RXDELAY 4 CACHE STRING "flash QMI RX delay with FLASH_DIV")
+    option(PICOCALC_QUEST_FLASH_SWEEP "qualify flash timings at boot (diagnostic)" OFF)
+    # SCI's AdLib music on one OPL2, mono, in place of two (M8; the
+    # patched sci/sound/drivers/adlib.cpp). It halves the music's cost
+    # but loses the panning, so it stays off: the owner listens through
+    # the headphone jack.
+    option(PICOCALC_QUEST_SCI_OPL_MONO "SCI's AdLib on one OPL2, mono" OFF)
+    # The timer manager's and digital iMUSE's locks, taken on core 0's
+    # thread alone, left out so they do not mask the audio IRQ (M8; the
+    # patched default-timer.h and dimuse.h).
+    option(PICOCALC_QUEST_THREAD_LOCKS "no audio mask for thread-only locks" ON)
     # ON draws M1's corner-coded test pattern at boot, for bring-up
     # (picocalc/core1.c); OFF, the panel stays black until the first frame.
     option(PICOCALC_QUEST_TEST_PATTERN "draw the test pattern at boot" OFF)
@@ -86,9 +108,6 @@ else()
     # (picocalc/audio_shim.c, §16 M5): core 0's interrupts masked for this
     # many milliseconds every five seconds.
     set(PICOCALC_QUEST_AUDIO_STALL 0 CACHE STRING "ms to mask core 0's interrupts every 5 s (scratch)")
-    # ScummVM's OPL (AdLib) emulator for every engine: "db" (DOSBox) or
-    # "mame" (§8.3, M5).
-    set(PICOCALC_QUEST_OPL db CACHE STRING "OPL emulator: db or mame")
     if (PICOCALC_QUEST_SCREEN_CHECK)
         set(PICOCALC_QUEST_SCREEN_CHECK_ON 1)
     else()
@@ -219,9 +238,15 @@ else()
         # How core 1 reads frames from the PSRAM (video.h, §7.3).
         PICOCALC_QUEST_FB_READ=${PICOCALC_QUEST_FB_READ}
         PICOCALC_QUEST_SCREEN_CHECK=${PICOCALC_QUEST_SCREEN_CHECK_ON}
+        PICOCALC_QUEST_ROW_COPY=$<BOOL:${PICOCALC_QUEST_ROW_COPY}>
+        PICOCALC_QUEST_ROW_PRESENT=$<BOOL:${PICOCALC_QUEST_ROW_PRESENT}>
+        PICOCALC_QUEST_FLASH_DIV=${PICOCALC_QUEST_FLASH_DIV}
+        PICOCALC_QUEST_FLASH_RXDELAY=${PICOCALC_QUEST_FLASH_RXDELAY}
+        PICOCALC_QUEST_FLASH_SWEEP=$<BOOL:${PICOCALC_QUEST_FLASH_SWEEP}>
+        PICOCALC_QUEST_SCI_OPL_MONO=$<BOOL:${PICOCALC_QUEST_SCI_OPL_MONO}>
+        PICOCALC_QUEST_THREAD_LOCKS=$<BOOL:${PICOCALC_QUEST_THREAD_LOCKS}>
         PICOCALC_QUEST_TEST_PATTERN=$<BOOL:${PICOCALC_QUEST_TEST_PATTERN}>
         PICOCALC_QUEST_AUDIO_STALL=${PICOCALC_QUEST_AUDIO_STALL}
-        PICOCALC_QUEST_OPL="${PICOCALC_QUEST_OPL}"
     )
 
     # As upstream: dlmalloc in mspace-only mode over PSRAM, with footers
@@ -267,8 +292,41 @@ else()
         -Wl,--wrap=cabal_file_close)
 
     # Upstream's linker script: the 64 KB main stack the GOB engine needs
-    # (§5.4, §12.1).
-    pico_set_linker_script(picocalc-quest ${PICOCALC_QUEST_UPSTREAM}/linker/memmap_frank_quest.ld)
+    # (§5.4, §12.1). M8's SRAM tiers (§16): the code of each tier's object
+    # files runs from SRAM, the way the SDK's script already keeps
+    # libgcc's out of flash: .text excludes them, so .data takes them.
+    # Each tier includes the ones before it; 0 is the control build. M8
+    # measured all four and kept them (milestones.md).
+    set(PICOCALC_QUEST_SRAM_TIER 4 CACHE STRING "SRAM placement tier, 0 none (M8)")
+    set(PICOCALC_QUEST_SRAM_TIERS
+        # 1: the mixer, the rate converter and both OPL emulators, the
+        #    one picocalc.ini names (§10.3).
+        "*audio/mixer.cpp.o *audio/rate.cpp.o *opl/dosbox.cpp.o *opl/dbopl.cpp.o *opl/mame.cpp.o"
+        # 2: SCI's AdLib driver and its music.
+        "*sci/sound/drivers/adlib.cpp.o *sci/sound/music.cpp.o"
+        # 3: SCI's interpreter: the VM, the kernel's dispatch, objects and
+        #    scripts.
+        "*sci/engine/vm.cpp.o *sci/engine/vm_types.cpp.o *sci/engine/selector.cpp.o *sci/engine/object.cpp.o *sci/engine/script.cpp.o *sci/engine/seg_manager.cpp.o *sci/engine/kernel.cpp.o"
+        # 4: the PSRAM heap.
+        "*drivers/psram_allocator.c.o *drivers/dlmalloc.c.o")
+    set(PICOCALC_QUEST_SRAM_FILES "")
+    foreach(tier RANGE 1 4)
+        if (tier LESS_EQUAL PICOCALC_QUEST_SRAM_TIER)
+            math(EXPR i "${tier} - 1")
+            list(GET PICOCALC_QUEST_SRAM_TIERS ${i} files)
+            string(APPEND PICOCALC_QUEST_SRAM_FILES " ${files}")
+        endif()
+    endforeach()
+    file(READ ${PICOCALC_QUEST_UPSTREAM}/linker/memmap_frank_quest.ld PICOCALC_QUEST_LD)
+    set(PICOCALC_QUEST_LD_EXCLUDE "EXCLUDE_FILE(*libgcc.a: *libc.a:*lib_a-mem*.o *libm.a:")
+    string(FIND "${PICOCALC_QUEST_LD}" "${PICOCALC_QUEST_LD_EXCLUDE}" at)
+    if (at LESS 0)
+        message(FATAL_ERROR "upstream's linker script has no ${PICOCALC_QUEST_LD_EXCLUDE}")
+    endif()
+    string(REPLACE "${PICOCALC_QUEST_LD_EXCLUDE}" "${PICOCALC_QUEST_LD_EXCLUDE}${PICOCALC_QUEST_SRAM_FILES}"
+        PICOCALC_QUEST_LD "${PICOCALC_QUEST_LD}")
+    file(GENERATE OUTPUT ${CMAKE_BINARY_DIR}/memmap_picocalc_quest.ld CONTENT "${PICOCALC_QUEST_LD}")
+    pico_set_linker_script(picocalc-quest ${CMAKE_BINARY_DIR}/memmap_picocalc_quest.ld)
 
     pico_add_extra_outputs(picocalc-quest)
 
