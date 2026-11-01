@@ -442,6 +442,16 @@ resets only the cores, so after a flash it still names the last
 power-on; the watchdog's `REASON` names a forced or timed watchdog
 reset. The banner prints both (found 2026-10-31).
 
+**PSRAM reads over SWD with the program running, no halt.** OpenOCD's
+`init`, then `dump_image FILE ADDRESS LENGTH` at the cached XIP address
+the program uses (`0x11xxxxxx`), then `shutdown`, reads PSRAM while both
+cores run. **Measured** on a Pimoroni Pico Plus 2 W at 5 MHz SWD,
+2026-11-01: 67,200 B in 0.34 s, about 194 KiB/s, repeatedly, with a game
+playing and audio running; the game carried on and a UART capture on the
+same probe kept logging. A byte-difference count the firmware computed
+between the same two buffers matched the dump's exactly, so the read sees the data the CPU
+sees. It lets you inspect a picture fault while it is still on the panel.
+
 ---
 
 ## 3. Clocks, voltage and overclocking

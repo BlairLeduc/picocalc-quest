@@ -25,7 +25,7 @@ to investigate, not a fail.
 | SCI's AdLib as one mono OPL2 (§8.3) | dropped, an option | Space Quest IV in play 53.8 → 39.5 %, its audio 28.4 → 12.8 %; the owner keeps the stereo |
 | MAME's OPL (§8.3) | kept, the default | in SRAM, still three to four times DOSBox's: Fate of Atlantis audio 42 % against 12 %, longest half 11.4 ms of 14.0; Day of the Tentacle 82.8 % at its busiest (DOSBox's: 50.4 %). `opl.<folder> = dosbox` per game |
 | Full Throttle's iMUSE lock across card reads (§8.2) | fixed | 163 ms and 3 late refills at a scene change (M5) → 0 late refills in 8 min 20 s through that scene |
-| Full Throttle's sheared movie frame (§19) | left | the cause found; the fix cured the shear but not the trails behind it, and was taken out |
+| Full Throttle's sheared movie frame (§19) | fixed after M8 (2026-11-01) | M8 found half the cause: re-laying the frame cured the shear but not the trails, and was taken out. The whole cause, a zeroed pixel format, is in §19: The Dig after `pigout.san`, front and back differ in 62,238 of 64,000 bytes → 0 |
 
 **The soak** (`scripts/soak.sh`, logs `out/m8-soak*.log`, not
 committed), 30 minutes on battery, the arrows held in turn and Enter
@@ -66,6 +66,8 @@ the shorter tour.
   also show white patches, in the frames as decoded. Both play right on
   the iPad's ScummVM. The owner stopped the chase (§19). The knocks
   heard in the scene are the game's, footsteps on a wooden porch.
+  Fixed after M8 (2026-11-01, §19); the white patches were not seen in
+  that test, and their cause is still unknown.
 - **Kyrandia's loader walked the heap** and printed some 35 lines before
   every archive: 792 dropped log lines at one launch. Taken out.
 - **`keys.sh` lost log lines**: it set the port up on every call, and the

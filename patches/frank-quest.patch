@@ -939,6 +939,31 @@
  	ScummEngine_v7 *_vm;
  	Audio::Mixer *_mixer;
  	ImuseDigiSndMgr *_sound;
+--- a/src/engines/scumm/smush/smush_player.cpp
++++ b/src/engines/scumm/smush/smush_player.cpp
+@@ -274,7 +274,11 @@
+ 	// we resort to this hackish solution for now.
+ 	_origPitch = vs->getPitch();
+ 	_origNumStrips = _vm->_gdi->_numStrips;
+-	vs->resetWithoutOwnership(vs->getWidth(), vs->getHeight(), vs->getWidth(), vs->getPixels(0, 0), vs->getFormat());
++	// picocalc-quest: reset() clears the surface's format before reading
++	// its argument, so pass a copy; and the surface's own base, which
++	// getPixels() would move by xstart.
++	const Graphics::PixelFormat format = vs->getFormat();
++	vs->resetWithoutOwnership(vs->getWidth(), vs->getHeight(), vs->getWidth(), (byte *)vs->getBasePtr(0, 0), format);
+ 	_vm->_gdi->_numStrips = vs->getWidth() / 8;
+ 
+ 	_vm->_mixer->stopHandle(_compressedFileSoundHandle);
+@@ -311,7 +315,8 @@
+ 	// HACK HACK HACK: This is an *evil* trick, beware! See above for
+ 	// some explanation.
+ 	VirtScreen &vs = _vm->_virtscr[kMainVirtScreen];
+-	vs.resetWithoutOwnership(vs.getWidth(), vs.getHeight(), _origPitch, vs.getPixels(0, 0), vs.getFormat());
++	const Graphics::PixelFormat format = vs.getFormat();
++	vs.resetWithoutOwnership(vs.getWidth(), vs.getHeight(), _origPitch, (byte *)vs.getBasePtr(0, 0), format);
+ 	_vm->_gdi->_numStrips = _origNumStrips;
+ 
+ 	delete _codec37;
 --- a/src/frank_quest_main.cpp
 +++ b/src/frank_quest_main.cpp
 @@ -15,9 +15,11 @@
