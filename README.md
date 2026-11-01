@@ -42,8 +42,8 @@ Either:
 
 Each game goes in its own folder under `/quest`, named as FRANK Quest's
 README lists (for example `monkey`, `atlantis`, `dott`, `ft`, `dig`,
-`sq3`, `kq4`, `gob1`, `kyra1`), or `sky` for Beneath a Steel Sky. The game
-list shows every folder it recognises. For the Sierra AGI games, `kq1`,
+`sq3`, `kq4`, `gob1`, `kyra1`), or `indy3` for Indiana Jones and the Last
+Crusade and `sky` for Beneath a Steel Sky. The game list shows every folder it recognises. For the Sierra AGI games, `kq1`,
 `kq2`, `kq3`, `sq1`, `sq2`, `lsl1` and `pq1` are taken as AGI when the
 folder has a `LOGDIR` file, and as the later SCI remakes when it does not.
 The CD version of Kyrandia also needs FRANK Quest's `KYRA.DAT` in its
@@ -54,15 +54,15 @@ folder. Beneath a Steel Sky needs `sky.dsk`, `sky.dnr` and ScummVM's
 
 | Engine | Games |
 |---|---|
-| SCUMM v1–v7 | Lucasfilm and LucasArts: Maniac Mansion to Monkey Island 2, Fate of Atlantis, Day of the Tentacle, Sam & Max, Full Throttle, The Dig |
+| SCUMM v3–v7 | Lucasfilm and LucasArts: Indiana Jones and the Last Crusade (DOS), Loom (VGA), Monkey Island 1 and 2, Fate of Atlantis, Day of the Tentacle, Sam & Max, Full Throttle, The Dig |
 | SCI0 / SCI1 | Sierra: King's Quest IV–VI, Space Quest III–V, Leisure Suit Larry II–V, Police Quest II–III, Quest for Glory I–III |
 | AGI | Sierra: King's Quest I–III, Space Quest I–II, Leisure Suit Larry I, Police Quest I |
 | GOB | Coktel Vision: Gobliiins, Gobliins 2, Goblins 3 |
 | KYRA | Westwood: The Legend of Kyrandia, Hand of Fate |
 | SKY | Revolution: Beneath a Steel Sky |
 
-Played on the PicoCalc during development: Fate of Atlantis, Day of the
-Tentacle, Full Throttle and The Dig; Space Quest III and IV; King's Quest I
+Played on the PicoCalc during development: The Last Crusade, Fate of
+Atlantis, Day of the Tentacle, Full Throttle and The Dig; Space Quest III and IV; King's Quest I
 and III (AGI) and Space Quest II; Gobliiins, Gobliins 2 and Goblins 3;
 Kyrandia; Beneath a Steel Sky. Other titles of these engines should run
 but have not been tried.
@@ -74,6 +74,8 @@ Known problems:
 - **CD versions of the Gob games** play without music: it is on CD audio
   tracks, which the engine cannot play.
 - **SCUMM v8** (The Curse of Monkey Island) is not built.
+- **Maniac Mansion and Zak McKracken** (SCUMM v1 and v2) cannot be started,
+  nor can the Steam release of Indiana Jones and the Last Crusade.
 - **Malcolm's Revenge** (Kyrandia 3) is not offered: on the PicoCalc its
   movie's sound cut out and it locked up at the first change of screen.
 

@@ -796,6 +796,16 @@ launches with that entry; upstream's version is the fallback. The log
 names the entry. Kyrandia's CD version needs upstream's `KYRA.DAT`
 (`dists/engine-data/`) in its folder.
 
+Indiana Jones and the Last Crusade is in neither of upstream's lists: the
+launcher started SCUMM v4 and up. The port adds `indy3`, needing `00.LFL`,
+and takes the VGA or EGA engine (`ScummEngine_v3`, `_v3old`) from that file's
+first bytes, as the detector does. The Steam release keeps its index in its
+executable and is not handled. Maniac Mansion and Zak McKracken have no
+launcher entries either. Played on the owner's English DOS VGA copy on a
+Plus 2 (release build): music in the opening, effects in play, several
+rooms, a save restored. The EGA path has not been run, and the Grail Diary
+check had not appeared; whether `copy_protection` skips it was not traced.
+
 Malcolm's Revenge is not in upstream's list, though its engine is in
 upstream's build, and it stays out of the selector. Tried on the owner's
 copy before 1.0 (release build, no probe, so nothing was measured): the
