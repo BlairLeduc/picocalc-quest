@@ -1405,7 +1405,7 @@ Atlantis 75 → 50 %, King's Quest I 51 → 11 %); SRAM tiers 1–4 (RAM
 (the owner's ear), with `opl.<folder> = dosbox` per game, Day of the
 Tentacle 82.8 % on it. Dropped: SCI in mono (Space Quest IV 53.8 →
 39.5 %), for the stereo. Fixed: Full Throttle's audio hold-off (§8.2).
-Left: its porch scene, fixed since (§19), and white movie patches (§19). The soak passed with
+Left: its porch scene, fixed since (§19). The soak passed with
 Fate of Atlantis: 30 minutes on battery, none of 1,811 heartbeats
 missing, 0 late refills, I²C errors and dropped lines. Four runs with
 Space Quest IV stopped on a script bug of the game's at its start (§19).
@@ -1467,6 +1467,9 @@ Every value the port depends on that has not been checked on this hardware
 
 **Dropped**, with reasons, so they are not re-planned (EL §14.5):
 
+- **Full Throttle's white movie patches.** Reported in M8 and never real:
+  the owner withdrew the report on 2026-11-01, having thought they saw
+  them. Nothing to look for.
 - **Pico, Pico 2, Pico 2 W.** No PSRAM; upstream cannot run without it.
 - **A Plus 2 W image.** Nothing uses the radio (D2).
 - **Scaling to fill the panel.** 320×200 to 320×320 is uneven, and costs
@@ -1494,11 +1497,6 @@ Every value the port depends on that has not been checked on this hardware
   their music as CD tracks; upstream's CD manager is an empty stub and
   builds no compressed-audio decoder, so they play effects and no music.
   The owner deferred it; it would take a track-file player and a decoder.
-- **Full Throttle's white movie patches** (found in M8): some movies
-  showed patches of white in their backgrounds, in the frames as decoded
-  (every row filled and sent); they play correctly on the iPad's
-  ScummVM. The owner did not see them in the test of 2026-11-01, which
-  does not show they are gone. Cause unknown.
 - **Fixed since M8: the sheared backdrop and trails after a movie**
   (2026-11-01), in Full Throttle's porch scene and worse in The Dig.
   SMUSH sets the screen's pitch to its width for a movie and back at the

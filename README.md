@@ -68,8 +68,6 @@ Known problems:
 
 - **Space Quest IV** can stop with a script error near its start, in the
   room where the droids arrive.
-- **Full Throttle** has shown patches of white in the backgrounds of some
-  movies. The game plays through.
 - **CD versions of the Gob games** play without music: it is on CD audio
   tracks, which the engine cannot play.
 - **SCUMM v8** (The Curse of Monkey Island) is not built.

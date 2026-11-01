@@ -66,8 +66,8 @@ the shorter tour.
   also show white patches, in the frames as decoded. Both play right on
   the iPad's ScummVM. The owner stopped the chase (§19). The knocks
   heard in the scene are the game's, footsteps on a wooden porch.
-  Fixed after M8 (2026-11-01, §19); the white patches were not seen in
-  that test, and their cause is still unknown.
+  Fixed after M8 (2026-11-01, §19). The white patches do not exist: the
+  owner withdrew the report that day, having thought they saw them.
 - **Kyrandia's loader walked the heap** and printed some 35 lines before
   every archive: 792 dropped log lines at one launch. Taken out.
 - **`keys.sh` lost log lines**: it set the port up on every call, and the
@@ -87,7 +87,7 @@ the shorter tour.
   growing; M5 showed it once. Likely a one-time allocation.
 
 **Not checked:** the release build; the Plus 2; Space Quest IV's patch
-against its script; the white patches' cause; a soak on battery of any
+against its script; a soak on battery of any
 title but Fate of Atlantis and Space Quest IV; the fault handler's crash
 record, which reads a constant junk value after every boot and so does
 not survive a restart.
