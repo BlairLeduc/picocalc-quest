@@ -8,3 +8,6 @@ out/
 # edited for the patch (design.md §5.1).
 /frank-quest/
 /working/
+
+# Release images (scripts/build_release.sh).
+dist/

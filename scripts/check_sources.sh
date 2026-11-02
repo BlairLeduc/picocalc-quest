@@ -41,12 +41,15 @@ foreach(list ${FQ_ALL_SOURCE_LISTS})
 endforeach()
 string(REPLACE ";" "\n" all "${all}")
 string(REPLACE ";" "\n" excluded "${FQ_EXCLUDED_SOURCES}")
+string(REPLACE ";" "\n" added "${FQ_ADDED_SOURCES}")
 file(WRITE ${OUT}/compiled "${all}\n")
 file(WRITE ${OUT}/excluded "${excluded}\n")
+file(WRITE ${OUT}/added "${added}\n")
 EOF
 cmake -DLISTS="$root/cmake/upstream-sources.cmake" -DOUT="$tmp" -P "$tmp/print.cmake"
 LC_ALL=C sort -u "$tmp/compiled" -o "$tmp/compiled"
 LC_ALL=C sort -u "$tmp/excluded" -o "$tmp/excluded"
+LC_ALL=C sort -u "$tmp/added" -o "$tmp/added"
 LC_ALL=C sort -u "$tmp/compiled" "$tmp/excluded" >"$tmp/ours"
 
 status=0
@@ -58,7 +61,7 @@ report() {
     fi
 }
 comm -23 "$tmp/upstream" "$tmp/ours" >"$tmp/missing"
-comm -13 "$tmp/upstream" "$tmp/ours" >"$tmp/unknown"
+comm -13 "$tmp/upstream" "$tmp/ours" | comm -23 - "$tmp/added" >"$tmp/unknown"
 comm -12 "$tmp/compiled" "$tmp/excluded" >"$tmp/both"
 while IFS= read -r f; do
     [ -f "$upstream/$f" ] || echo "$f"

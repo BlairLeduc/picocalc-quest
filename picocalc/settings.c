@@ -13,7 +13,21 @@
 #endif
 
 /* The engine numbers of picocalc_input.h, which is not pure. */
-enum { ENGINE_SCUMM = 1, ENGINE_SCI, ENGINE_KYRA, ENGINE_GOB, ENGINE_AGI };
+enum { ENGINE_SCUMM = 1, ENGINE_SCI, ENGINE_KYRA, ENGINE_GOB, ENGINE_AGI, ENGINE_SKY };
+
+/* ScummVM's names, ranges and defaults; the defaults are what upstream's
+ * launchers set for every game. */
+static const struct {
+    const char *name;
+    uint16_t    lo, hi, def;
+    const char *why;
+} s_numbers[SETTINGS_NUMBERS] = {
+    [SETTINGS_MUSIC_VOLUME]  = { "music_volume", 0, 255, 192, "a number, 0 to 255" },
+    [SETTINGS_SFX_VOLUME]    = { "sfx_volume", 0, 255, 192, "a number, 0 to 255" },
+    [SETTINGS_SPEECH_VOLUME] = { "speech_volume", 0, 255, 192, "a number, 0 to 255" },
+    [SETTINGS_TALKSPEED]     = { "talkspeed", 0, 255, 60, "a number, 0 to 255" },
+    [SETTINGS_TEMPO]         = { "tempo", 50, 200, 100, "a number, 50 to 200" },
+};
 
 void settings_defaults(settings_t *s) {
     memset(s, 0, sizeof *s);
@@ -21,7 +35,6 @@ void settings_defaults(settings_t *s) {
     s->left_button = ']';
     s->right_button = '[';
     s->pointer_speed = 100;
-    s->volume = 100;
     /* AGI's hero walks with the arrows; every other engine is pointed
      * and clicked. SCI0 takes both, and starts as a pointer (§9.3). */
     s->pointer_mode[ENGINE_SCUMM] = true;
@@ -29,20 +42,21 @@ void settings_defaults(settings_t *s) {
     s->pointer_mode[ENGINE_KYRA] = true;
     s->pointer_mode[ENGINE_GOB] = true;
     s->pointer_mode[ENGINE_AGI] = false;
+    s->pointer_mode[ENGINE_SKY] = true;
     /* MAME's, the owner's choice by ear (M8); DOSBox's, a third to a
      * quarter of the cost, for a game that has no room for it (§8.3). */
     s->opl = SETTINGS_OPL_MAME;
     /* Upstream's launchers turned them on for every game. */
     s->subtitles = true;
+    for (unsigned i = 0; i < SETTINGS_NUMBERS; i++) s->number[i] = s_numbers[i].def;
 }
 
 const char *settings_opl_driver(unsigned opl) {
     return opl == SETTINGS_OPL_MAME ? "mame" : "db";
 }
 
-int settings_gain(unsigned volume) {
-    unsigned gain = (volume * 128u + 50u) / 100u;
-    return gain > 255u ? 255 : (int)gain;
+const char *settings_number_name(unsigned which) {
+    return s_numbers[which].name;
 }
 
 static bool is_space(char c) {
@@ -122,6 +136,7 @@ static settings_game_t *game(settings_t *s, const char *f, size_t fn, const char
         s->game[i].folder[fn] = '\0';
         s->game[i].opl = SETTINGS_UNSET;
         s->game[i].subtitles = SETTINGS_UNSET;
+        for (unsigned j = 0; j < SETTINGS_NUMBERS; j++) s->game[i].number[j] = SETTINGS_NUMBER_UNSET;
         s->games++;
     }
     return &s->game[i];
@@ -150,6 +165,32 @@ static const char *subtitles_game(settings_t *s, const char *f, size_t fn, const
     return NULL;
 }
 
+/* A number's default, or <name>.<folder> for one game's. NULL if used,
+ * otherwise why not; is_number says whether the key was a number's. */
+static const char *number_key(settings_t *s, const char *k, size_t kn, const char *v, size_t vn,
+                              bool *is_number) {
+    for (unsigned i = 0; i < SETTINGS_NUMBERS; i++) {
+        size_t n = strlen(s_numbers[i].name);
+        if (kn < n || !same(k, n, s_numbers[i].name) || (kn > n && (k[n] != '.' || kn == n + 1))) {
+            continue;
+        }
+        *is_number = true;
+        uint16_t value;
+        if (!number(v, vn, s_numbers[i].lo, s_numbers[i].hi, &value)) return s_numbers[i].why;
+        if (kn == n) {
+            s->number[i] = value;
+            return NULL;
+        }
+        const char *why;
+        settings_game_t *g = game(s, k + n + 1, kn - n - 1, &why);
+        if (g == NULL) return why;
+        g->number[i] = value;
+        return NULL;
+    }
+    *is_number = false;
+    return NULL;
+}
+
 static const settings_game_t *find_game(const settings_t *s, const char *folder) {
     size_t n = strlen(folder);
     for (unsigned i = 0; i < s->games; i++) {
@@ -168,12 +209,17 @@ bool settings_subtitles_for(const settings_t *s, const char *folder) {
     return g != NULL && g->subtitles != SETTINGS_UNSET ? g->subtitles != 0 : s->subtitles;
 }
 
+unsigned settings_number_for(const settings_t *s, const char *folder, unsigned which) {
+    const settings_game_t *g = find_game(s, folder);
+    return g != NULL && g->number[which] != SETTINGS_NUMBER_UNSET ? g->number[which] : s->number[which];
+}
+
 static const struct {
     const char *name;
     int         engine;
 } s_modes[] = {
     { "agi_mode", ENGINE_AGI },   { "sci_mode", ENGINE_SCI }, { "scumm_mode", ENGINE_SCUMM },
-    { "kyra_mode", ENGINE_KYRA }, { "gob_mode", ENGINE_GOB },
+    { "kyra_mode", ENGINE_KYRA }, { "gob_mode", ENGINE_GOB },   { "sky_mode", ENGINE_SKY },
 };
 
 /* One key and value onto s: NULL if used, otherwise why not. `which` is
@@ -194,9 +240,9 @@ static const char *apply(settings_t *s, const char *k, size_t kn, const char *v,
         return number(v, vn, SETTINGS_SPEED_MIN, SETTINGS_SPEED_MAX, &s->pointer_speed)
                    ? NULL : "a number, 25 to 400";
     }
-    if (same(k, kn, "volume")) {
-        return number(v, vn, 0, SETTINGS_VOLUME_MAX, &s->volume) ? NULL : "a number, 0 to 200";
-    }
+    bool is_number;
+    const char *why = number_key(s, k, kn, v, vn, &is_number);
+    if (is_number) return why;
     if (same(k, kn, "opl")) return opl(v, vn, &s->opl);
     if (kn > 4 && same(k, 4, "opl.")) return opl_game(s, k + 4, kn - 4, v, vn);
     if (same(k, kn, "subtitles")) return on_off(v, vn, &s->subtitles);
@@ -336,12 +382,17 @@ void settings_load(void) {
     }
 
     const settings_t *s = &g_settings;
-    printf("  settings     : buttons %c left, %c right; pointer %u%%; volume %u%%; "
-           "pointer mode in scumm %d sci %d kyra %d gob %d agi %d; opl %s; subtitles %s\n",
-           s->left_button, s->right_button, s->pointer_speed, s->volume,
+    printf("  settings     : buttons %c left, %c right; pointer %u%%; "
+           "volume music %u sfx %u speech %u; talkspeed %u, tempo %u; "
+           "pointer mode in scumm %d sci %d kyra %d gob %d agi %d sky %d; opl %s; subtitles %s\n",
+           s->left_button, s->right_button, s->pointer_speed,
+           s->number[SETTINGS_MUSIC_VOLUME], s->number[SETTINGS_SFX_VOLUME],
+           s->number[SETTINGS_SPEECH_VOLUME], s->number[SETTINGS_TALKSPEED],
+           s->number[SETTINGS_TEMPO],
            s->pointer_mode[ENGINE_SCUMM], s->pointer_mode[ENGINE_SCI],
            s->pointer_mode[ENGINE_KYRA], s->pointer_mode[ENGINE_GOB],
-           s->pointer_mode[ENGINE_AGI], settings_opl_driver(s->opl), s->subtitles ? "on" : "off");
+           s->pointer_mode[ENGINE_AGI], s->pointer_mode[ENGINE_SKY],
+           settings_opl_driver(s->opl), s->subtitles ? "on" : "off");
     for (unsigned i = 0; i < s->games; i++) {
         const settings_game_t *g = &s->game[i];
         if (g->opl != SETTINGS_UNSET) {
@@ -350,6 +401,12 @@ void settings_load(void) {
         if (g->subtitles != SETTINGS_UNSET) {
             printf("  settings     : subtitles %s in /quest/%s\n", g->subtitles ? "on" : "off",
                    g->folder);
+        }
+        for (unsigned j = 0; j < SETTINGS_NUMBERS; j++) {
+            if (g->number[j] != SETTINGS_NUMBER_UNSET) {
+                printf("  settings     : %s %u in /quest/%s\n", settings_number_name(j), g->number[j],
+                       g->folder);
+            }
         }
     }
 }

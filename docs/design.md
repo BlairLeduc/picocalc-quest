@@ -164,7 +164,7 @@ compiled: the five engines and the parts of `common/`, `audio/`,
   `OSystem`, clears the singletons and wipes the mspace in one step.
 - **Clock:** 504 MHz at 1.65 V by default (`vreg_disable_voltage_limit`),
   PSRAM capped at 133 MHz (100 MHz in release builds), flash at 66 MHz.
-- **Image size:** the 1.00 release UF2 is 7,322,112 bytes, so about 3.6 MB
+- **Image size:** the 1.00 release UF2 is 7,322,124 bytes, so about 3.6 MB
   of flash image.
 - **No clock:** `OSystem_RP2350::getTimeAndDate()` makes up 1 January 2025
   plus the time since boot, and the SD driver's `get_fattime()` returns 0,
@@ -297,6 +297,14 @@ and PIO-SPI files, and with upstream's compile definitions (`ENABLE_*`,
 `scripts/check_sources.sh` extracts the `.c`/`.cpp` lists from upstream's
 `CMakeLists.txt` and diffs them against ours, so a submodule bump that adds
 or removes an engine file is reported, not silently missed. CI runs it.
+
+Beneath a Steel Sky's engine is in upstream's tree but not its build. The
+port compiles it as `FQ_SKY_ENGINE_SOURCES`, and `FQ_ADDED_SOURCES` is what
+lets `check_sources.sh` accept files upstream does not build. `musicbase.cpp`
+is patched to skip the optional enhanced music tracks, whose decoders
+`CABAL_MINIMAL_AUDIO` leaves out, so the music is always AdLib. Its folder is `sky`, `bass` or `steelsky`, and its data
+includes `sky.cpt`, which the engine checks by size (419,427 bytes). Its
+debugger, reached by the `#` key, is the stub every engine has here.
 
 Upstream's linker script is reused, by path into the patched copy: it gives
 the 64 KB main stack the GOB engine needs.
@@ -788,6 +796,28 @@ launches with that entry; upstream's version is the fallback. The log
 names the entry. Kyrandia's CD version needs upstream's `KYRA.DAT`
 (`dists/engine-data/`) in its folder.
 
+Indiana Jones and the Last Crusade is in neither of upstream's lists: the
+launcher started SCUMM v4 and up. The port adds `indy3`, needing `00.LFL`,
+and takes the VGA or EGA engine (`ScummEngine_v3`, `_v3old`) from that file's
+first bytes, as the detector does. The Steam release keeps its index in its
+executable and is not handled. Maniac Mansion and Zak McKracken have no
+launcher entries either. Played on the owner's English DOS VGA copy on a
+Plus 2 (release build): music in the opening, effects in play, several
+rooms, a save restored. The EGA path has not been run, and the Grail Diary
+check had not appeared; whether `copy_protection` skips it was not traced.
+
+Malcolm's Revenge is not in upstream's list, though its engine is in
+upstream's build, and it stays out of the selector. Tried on the owner's
+copy before 1.0 (release build, no probe, so nothing was measured): the
+intro movie's sound played about a second a scene, and the first change of
+screen locked up, Ctrl+Alt+Del included. From the source only, the lock-up
+is probably `SoundDigital`: `AUDStream::readChunk()` reads the card from the
+mixer, so from the audio IRQ, where it can cut into a card transfer of the
+main thread's (`FF_FS_REENTRANT` is 0). A fix would have the main thread
+read the sound, whole or ahead of the mixer. The movie's sound takes
+another path (`VQADecoder` queues it as frames decode), and its cause is
+unknown; measure it with the probe first.
+
 The selector skips macOS's `._` files (HW §7.1) if upstream does not
 already.
 
@@ -800,21 +830,46 @@ with every default in one function (EL §8.7), `picocalc/settings.c`:
 left_button   = ]        one printable key; a letter in any case
 right_button  = [
 pointer_speed = 100      per cent of the curve of §9.3, 25-400
-volume        = 100      per cent of the mixer's level, 0-200
+music_volume  = 192      ScummVM's level for each kind of sound, 0-255
+sfx_volume    = 192
+speech_volume = 192
 agi_mode      = keys     what the arrows start as: pointer or keys
 sci_mode      = pointer
 scumm_mode    = pointer
 kyra_mode     = pointer
 gob_mode      = pointer
+sky_mode      = pointer
 opl           = mame     the OPL (AdLib) emulator: mame or dosbox (§8.3)
 opl.dott      = dosbox   the same for one game, by its folder in /quest
 subtitles     = on       the games' text with their speech: on or off
 subtitles.dig = off      the same for one game, by its folder
+talkspeed     = 60       SCUMM: how long text stays, 0-255, higher is longer
+tempo         = 100      SCUMM: iMUSE's music speed, per cent, 50-200
 ```
+
+The volumes, `talkspeed` and `tempo` take a folder too
+(`music_volume.kyr1 = 255`). They have ScummVM's names, ranges and
+defaults, which are what upstream's launchers set. Upstream builds neither
+Cabal's command line nor its `base/main.cpp`, so a Cabal option exists here
+only as the config key an engine reads, and is offered only where the path
+from that key to the sound or text was read through in the source:
+
+| Setting | Reaches | Does not reach |
+|---|---|---|
+| `music_volume` | All six engines' music, through the mixer or the engine's own OPL level. AGI's script variable overwrote it, so `AgiEngine::setvar` is patched to scale by it, 192 leaving the script's level as it was | |
+| `sfx_volume` | Sampled effects (SCUMM, SCI, Kyra, Gob, Sky) | Effects played as AdLib notes, which follow `music_volume`; AGI, whose sound is all music |
+| `speech_volume` | SCUMM talkies, digital iMUSE, SCI CD, Kyra CD, Sky CD | Games with no speech |
+| `talkspeed` | SCUMM only. Ten steps of `VAR_CHARINC`, 0-9; it overrides the game's own speed, as it always has, the launcher having set 60 | Other engines; Kyra reads the key and stays at 60 |
+| `tempo` | iMUSE MIDI: SCUMM v3-v6 with AdLib, such as Monkey Island 2, Fate of Atlantis, Day of the Tentacle, Sam & Max. It scales `MidiParser`'s timer rate | Digital iMUSE (Full Throttle, The Dig), CD audio, Loom's and Indiana Jones 3's AD player. `dimuse_tempo` is left out: it is the digital iMUSE's callback rate, not the music's speed |
+
+Music that a script waits on moves with `tempo`, so a far setting may
+change a scene's timing. The master gain stays at unity; a setting of 192
+is 75 % of the mixer's scale, so 255 is at most a third louder. The old
+`volume` is no longer a setting and is named as a line not used.
 
 Up to 16 folders have settings of their own. Subtitles are on by default,
 as upstream's launchers had them for every game; they matter only to games
-with speech (SCUMM talkies, SCI CD titles, Kyrandia CD). A SCUMM game told
+with speech (SCUMM talkies, SCI CD titles, Kyrandia CD, Beneath a Steel Sky CD). A SCUMM game told
 to show no subtitles still shows them if its speech is muted.
 
 Keys and words are in any case; blank lines and lines starting `#` or `;`
@@ -933,8 +988,11 @@ tiers.
 
 ### 12.3 Flash
 
-~3.6 MB of 16 MB. Ample for the image; nothing else is stored in flash.
-UF2 Loader's application partition must also hold it (§17).
+About 3.8 MB of 16 MB (3,770 KB in M9's release build); nothing else is
+stored in flash. UF2 Loader's application partition must also hold it. The
+shell's 16 MB loader build gives 16,372 KB, as read on the owner's board; the
+stock loader, built for a 4 MB Pico 2, gives 4,088 KB, which leaves about
+318 KB (§17; HW §2.7).
 
 ---
 
@@ -1108,6 +1166,17 @@ PicoCalc, so development follows EL §13.1 and HW §2.7:
   boot.
 - **Release**: no UART, no stdio; GP2/GP3 free. A counter block at a fixed
   symbol with a magic word, read over SWD without halting (HW §2.7).
+  `picocalc/counters.h` holds it: `picocalc_quest_counters`, 124 bytes,
+  with the magic, a layout number, the heartbeat's totals and last-second
+  shares, and the `git describe` version. Core 1 fills it at each
+  heartbeat in both builds; core 0 adds at boot whether UF2 Loader
+  started the image, the image's size, and UF2 Loader's app partition's,
+  from the bootrom's resident table (§12.3), which the development banner
+  also prints. Under UF2 Loader that reads 0 (M9): the loader calls
+  `rom_load_partition_table` first and the port makes no flash command to do
+  so, so the size is read with `picotool info -a` in BOOTSEL instead. `scripts/counters.sh` finds the block with `nm` and reads
+  it with OpenOCD's `init` alone; `--watch` reads it every minute through
+  a soak and checks the run (M9).
 
 ### 14.3 Heartbeat
 
@@ -1394,10 +1463,10 @@ Atlantis 75 → 50 %, King's Quest I 51 → 11 %); SRAM tiers 1–4 (RAM
 (the owner's ear), with `opl.<folder> = dosbox` per game, Day of the
 Tentacle 82.8 % on it. Dropped: SCI in mono (Space Quest IV 53.8 →
 39.5 %), for the stereo. Fixed: Full Throttle's audio hold-off (§8.2).
-Left: its porch scene, fixed since (§19), and white movie patches (§19). The soak passed with
+Left: its porch scene, fixed since (§19). The soak passed with
 Fate of Atlantis: 30 minutes on battery, none of 1,811 heartbeats
 missing, 0 late refills, I²C errors and dropped lines. Four runs with
-Space Quest IV stopped on a script bug of the game's at its start (§19).
+Space Quest IV stopped on a script error at its start, later put down to a missing `701.HEP` (§19).
 
 ### M9: Release
 
@@ -1411,6 +1480,11 @@ Space Quest IV stopped on a script bug of the game's at its start (§19).
 
 **Done when** the release UF2 boots from UF2 Loader and from BOOTSEL, a
 title from each engine plays, and the documents describe what shipped.
+
+**Done** 2026-11-01 (`milestones.md`). Both boards, both routes, a title per
+engine, several hours by hand on battery. The soak with counters ran on the
+Plus 2 W: 0 I²C errors and lost keys, and 3 late refills, cause not looked
+for, which the owner heard nothing of and accepted for 1.0.
 
 ---
 
@@ -1429,7 +1503,7 @@ Every value the port depends on that has not been checked on this hardware
 | Ctrl+Alt+Del delivered by the MCU | yes | used on the keyboard by the owner, M3 | high | Confirmed 2026-10-29 |
 | Mixer half fits 14 ms with OPL at 300 MHz | yes, with DOSBox's OPL | longest half 7.8 ms over every engine (M5); MAME's 10.8 ms in one intro | high | Confirmed 2026-10-29 |
 | PSRAM frame read cost | hidden behind the wire; 6 % of core 0 by DMA | measured, M2 (§7.3) | high | Confirmed 2026-10-29; M8 measures under engines |
-| UF2 Loader's app partition holds 3.6 MB | yes | not checked | low | M9 |
+| UF2 Loader's app partition holds the image (3,770 KB) | yes; 16,372 KB on the shell's 16 MB loader, 4,088 KB on the stock 4 MB one | `picotool info -a` on the owner's board (M9); the stock size from UF2 Loader's source | high for the shell's build, medium for stock | M9 |
 | POWMAN timer unaffected by the move to 300 MHz | yes | read either side of the switch, M1 | high | Confirmed 2026-10-29 |
 | Shell's clock record survives into the port and reads correctly | yes | read at boot, M1, after a reset over SWD; a launch from the shell gave a save the shell's local time, M7 | high | Confirmed 2026-10-30 |
 | Upstream's SRAM use leaves room for the port | yes; 342,920 bytes left | measured, M0 build | high | Confirmed 2026-10-29 |
@@ -1456,6 +1530,15 @@ Every value the port depends on that has not been checked on this hardware
 
 **Dropped**, with reasons, so they are not re-planned (EL §14.5):
 
+- **Space Quest IV's script error at its start.** Found in M8, in room 25,
+  script 701: `turnCycle` doing arithmetic on an object, or the program
+  counter going astray, four times in about two hours of soak. The card had
+  `701.SCR` without `701.HEP`. With every `.HEP` copied, the owner played that
+  room many times on the release build with no error (M9). Intermittent, so
+  not proof; reopen it if it comes back with the files in place.
+- **Full Throttle's white movie patches.** Reported in M8 and never real:
+  the owner withdrew the report on 2026-11-01, having thought they saw
+  them. Nothing to look for.
 - **Pico, Pico 2, Pico 2 W.** No PSRAM; upstream cannot run without it.
 - **A Plus 2 W image.** Nothing uses the radio (D2).
 - **Scaling to fill the panel.** 320×200 to 320×320 is uneven, and costs
@@ -1466,6 +1549,9 @@ Every value the port depends on that has not been checked on this hardware
 
 **Deferred**, with what would bring each back:
 
+- **Malcolm's Revenge (Kyrandia 3).** Left out of 1.0 (§10.2's note on the
+  selector). A probe on the board and the sound read away from the audio
+  IRQ would bring it back.
 - **An overclock above 300 MHz.** If the M4 gate fails after M8's levers.
 - **An in-game menu** (volume, pointer speed, mode, save settings). If the
   settings file proves awkward in use.
@@ -1483,11 +1569,6 @@ Every value the port depends on that has not been checked on this hardware
   their music as CD tracks; upstream's CD manager is an empty stub and
   builds no compressed-audio decoder, so they play effects and no music.
   The owner deferred it; it would take a track-file player and a decoder.
-- **Full Throttle's white movie patches** (found in M8): some movies
-  showed patches of white in their backgrounds, in the frames as decoded
-  (every row filled and sent); they play correctly on the iPad's
-  ScummVM. The owner did not see them in the test of 2026-11-01, which
-  does not show they are gone. Cause unknown.
 - **Fixed since M8: the sheared backdrop and trails after a movie**
   (2026-11-01), in Full Throttle's porch scene and worse in The Dig.
   SMUSH sets the screen's pitch to its width for a movie and back at the
@@ -1501,13 +1582,6 @@ Every value the port depends on that has not been checked on this hardware
   base: `getPixels(0, 0)` adds `xstart`, which the zero format had
   half hidden. Every movie in the test was at `xstart` 0, so the base
   half has not run in a scrolled room.
-- **Space Quest IV's script error at its start** (found in M8): in room
-  25, script 701, `turnCycle` does arithmetic on an object, or the
-  interpreter's program counter goes astray, and the game stops; the
-  soak's walking and clicking near the rope as the droids arrive hit it
-  four times in about two hours. ScummVM's patch for its bug #6076,
-  ported, did not stop it. Next: log whether the patch matches this
-  copy's script.
 - **A save and load menu for SCUMM.** Its menu is ScummVM's GUI, which
   the build leaves out; Alt+1…9 and Ctrl+1…9 save and load, with no list
   and no names. If quick saves prove too little.

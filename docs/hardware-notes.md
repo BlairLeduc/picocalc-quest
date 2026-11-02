@@ -311,6 +311,33 @@ The driver reaches the chip over a **PIO SPI whose divider is fixed against
   sleep; `caffeinate -d` (or `-dims`) keeps the display up. Found by the
   owner of the PicoCalc emulators, 2026-10-04, after two unexplained
   drop-outs: both cores were still running their normal loops each time.
+- **UF2 Loader's app partition is the flash less 8 KB, as the loader was
+  built.** UF2 Loader (pelrun, 2.5) puts one partition table in the first
+  8 KB of an RP2350's flash, with one partition, "App", from 8 KB to the
+  end of the flash size the loader was compiled for
+  (`PICO_FLASH_SIZE_BYTES / 1024 - 8` KB, `stage3/partitions.json.in`).
+  The released `bootloader_pico2.uf2` is built for the Pico 2's 4 MB, so
+  on a Plus 2 or Plus 2 W, with 16 MB fitted, an application has
+  **4,088 KB**, not 16 MB, unless the loader is rebuilt for 16 MB. The
+  loader remaps XIP so the partition appears at `0x10000000`; an image
+  built for that address runs unchanged. The bootrom's
+  `get_partition_table_info` reads the partition from the table it keeps
+  in RAM, without touching flash, but that table is only there once something
+  has loaded it: a program started by the loader finds none, and reports
+  no partition (read on a board, 2026-11-01). Read from source, 2026-10-31.
+  **Read on a
+  board**, 2026-11-01, with `picotool info -a` in BOOTSEL (no probe needed):
+  the shell's 16 MB build, `2.5-shell`, has App at `0x2000` to `0xfff000`,
+  16,372 KB. That build starts the shell at power-on; Up, F1 or F5 start the
+  program.
+- **A BOOTSEL copy under UF2 Loader goes into the App partition**, and may
+  not finish. One such copy from a Mac (2026-11-01) left 3,840 bytes erased,
+  from `0x100d2100` in the image, in the Gob engine's code: the sector was
+  erased, its first block written, and nothing after. The rest matched only
+  because the same image was already there. The drive going away does not
+  show a copy finished; compare with `picotool save` and the UF2's blocks.
+  Why it stopped is not known. After `flash_nuke.uf2`, the same image copied
+  and ran on a Plus 2 W.
 - **Configure stdio explicitly.** Select UART, USB CDC or a custom LCD
   `stdio_driver_t` in the application. Keep CMake's UART definitions consistent
   with the pin header. Multiple enabled stdio drivers can receive output;

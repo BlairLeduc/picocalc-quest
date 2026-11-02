@@ -4,6 +4,67 @@ What each milestone verified, on which board, on what date, and what was
 not checked, newest first. `design.md` §16 holds each milestone's scope
 and done-when criteria; this file keeps the full record.
 
+**M9 (release) is done**, on 2026-11-01, on a Pimoroni Pico Plus 2 and a
+Pico Plus 2 W in PicoCalcs, Arm GCC 15.2.Rel1 and SDK 2.3.1, release build
+`f2d8b43` (`dist/`), version 1.0. The owner ran every check on the boards;
+they saw no difference between the two.
+
+| Check | Result |
+|---|---|
+| UF2 Loader: the shell flashes it and runs it; Esc in the game list goes back to the shell | passed, both boards |
+| BOOTSEL, on flash erased with `flash_nuke.uf2`: boots; Esc in the game list powers off, the help reading "ESC: Power off" | passed, both boards |
+| A title per engine | passed, both boards |
+| Hand play on battery | several hours |
+| Soak with counters, below | run; **3 late refills, accepted by the owner** |
+
+**Played** on this image: Beneath a Steel Sky; Day of the Tentacle, Full
+Throttle, Fate of Atlantis, The Last Crusade, The Dig; King's Quest I to III;
+Kyrandia and Hand of Fate; Space Quest I to V; Gobliiins, Gobliins 2 and
+Goblins 3.
+
+**The soak**: Plus 2 W, from UF2 Loader, Space Quest IV by hand, on battery,
+`scripts/counters.sh --watch 30`, log `out/counters-20261101-173106.log`, not
+committed. 31 reads over 30.0 minutes; up from 44 s to 1,844 s with no
+restart; 39,581 frames, new ones between every two reads; 10 dropped, all in
+the first two minutes; 2,767 on the key count with 0 lost; 0 I²C errors; the
+longest mixer half 6,258 µs, reached by about 6 minutes; 22 to 27 °C; battery
+77 to 74 %.
+
+**The script's check reports FAILED, on late refills**: 2 between 1,064 s and
+1,124 s of uptime, and 1 between 1,184 s and 1,244 s, a minute that averaged
+10.4 fps. The longest mixer half did not move, so the audio IRQ was probably
+held off rather than slow, as in M5, but **the cause was not looked for**.
+The owner heard nothing distracting and accepted it for 1.0. §16's done-when
+does not ask for zero; the check's limit stays as it is.
+
+**Added in this milestone, at the owner's request:**
+
+- **Beneath a Steel Sky**, the engine added to the build (§5.4).
+- **Indiana Jones and the Last Crusade**, SCUMM v3 added to the launcher
+  (§10.2); its English DOS VGA copy played on a Plus 2.
+- **`music_volume`, `sfx_volume`, `speech_volume`, `talkspeed`, `tempo`**
+  replacing `volume` (§10.3). The owner confirmed the volumes work.
+
+**Found:**
+
+- **Malcolm's Revenge does not work** and stays out (§10.2, §19): its movie's
+  sound cuts out, and the first change of screen locks up. Measured nothing;
+  no probe was to hand. The lock-up's likely cause is from the source only.
+- **Space Quest IV's script error was probably a missing file**: `701.HEP`
+  (below, M8; §19).
+- **The owner's loader is the shell's build**, whose app partition is
+  16,372 KB, and which starts the shell at power-on (HW §2.7).
+- **A BOOTSEL copy over UF2 Loader stopped early** from a Mac and left 3,840
+  bytes erased (HW §2.7); `picotool` found it. Erasing the flash first worked.
+  The README now gives the card as the way on a board with the loader.
+- **The README claimed SCUMM v1 and v2**, which the launcher cannot start.
+- **The counter block's `partition_kb` reads 0 under UF2 Loader** (§14.2).
+
+**Not checked:** the cause of the late refills; the counters on the Plus 2;
+Indy 3's EGA path, and its Grail Diary check, which had not appeared; which
+of the two boards `picotool` read; why the BOOTSEL copy stopped; a soak of the
+final tagged image, whose source differs only in its documents and version.
+
 **M8 (performance pass and soak) is done**, on 2026-10-31, on the same
 Pimoroni Pico Plus 2 W in a PicoCalc, flashed over SWD, with Arm GCC
 15.2.Rel1 and SDK 2.3.1, development build. Each lever was measured
@@ -66,8 +127,8 @@ the shorter tour.
   also show white patches, in the frames as decoded. Both play right on
   the iPad's ScummVM. The owner stopped the chase (§19). The knocks
   heard in the scene are the game's, footsteps on a wooden porch.
-  Fixed after M8 (2026-11-01, §19); the white patches were not seen in
-  that test, and their cause is still unknown.
+  Fixed after M8 (2026-11-01, §19). The white patches do not exist: the
+  owner withdrew the report that day, having thought they saw them.
 - **Kyrandia's loader walked the heap** and printed some 35 lines before
   every archive: 792 dropped log lines at one launch. Taken out.
 - **`keys.sh` lost log lines**: it set the port up on every call, and the
@@ -78,7 +139,12 @@ the shorter tour.
   once the interpreter's program counter went astray, each stopping the
   game; once also unattended after a soak. ScummVM's patch for its bug
   #6076 (`droidShoots`), ported, did not stop it: either it does not
-  match this copy or the cause is another. Not fixed (§19).
+  match this copy or the cause is another. Not fixed (§19). **Corrected in
+  M9:** the card had `701.SCR` without its `701.HEP`. With every `.HEP`
+  copied, the owner played that room many times, dying and restarting, on
+  the release build with no error. So it was probably not Sierra's bug, as
+  this entry's opening says, though the error was intermittent and that is
+  not proof. The patch is no longer in the tree.
 - **No restart had a reason in the log**: the banner now names the
   chip's last reset (power-on, brown-out, debugger, watchdog forced, and
   the rest). It showed the soak's restarts were the error page's, not a
@@ -87,7 +153,7 @@ the shorter tour.
   growing; M5 showed it once. Likely a one-time allocation.
 
 **Not checked:** the release build; the Plus 2; Space Quest IV's patch
-against its script; the white patches' cause; a soak on battery of any
+against its script; a soak on battery of any
 title but Fate of Atlantis and Space Quest IV; the fault handler's crash
 record, which reads a constant junk value after every boot and so does
 not survive a restart.

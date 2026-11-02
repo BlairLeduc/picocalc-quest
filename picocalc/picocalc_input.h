@@ -29,6 +29,7 @@ int picocalc_input_key(int *pressed, int *keycode, int *ascii, int *flags);
 #define PICOCALC_ENGINE_KYRA  3
 #define PICOCALC_ENGINE_GOB   4
 #define PICOCALC_ENGINE_AGI   5
+#define PICOCALC_ENGINE_SKY   6
 
 /* Core 0, before a game starts and after it ends: the arrows' mode for
  * that engine (§9.3), shown in the status band; with NONE, every key
